@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+	<title>Circle Dodge Multiplayer</title>
+	<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+	<div id="app">
+		<div id="menu">
+			<h1>Circle Dodge</h1>
+			<label>
+				<span>Name</span>
+				<input id="nameInput" type="text" maxlength="24" placeholder="Your name" />
+			</label>
+			<div class="row">
+				<button id="createBtn">Create Room</button>
+			</div>
+			<div class="row join">
+				<input id="roomInput" type="text" maxlength="8" placeholder="Room code" />
+				<button id="joinBtn">Join</button>
+			</div>
+			<p class="hint">Controls: WASD/Arrows or drag joystick on mobile</p>
+		</div>
+		<canvas id="game"></canvas>
+		<div id="hud">
+			<div id="topbar">
+				<div id="roomInfo"></div>
+				<div id="hostControls" class="hidden"><button id="startBtn">Start Round</button></div>
+			</div>
+			<div id="scoreboard"></div>
+			<div id="announcement"></div>
+			<div id="settingsPanel" class="panel hidden">
+				<h3>Game Settings</h3>
+				<div class="grid">
+					<label>Player size <input id="setPlayerRadius" type="number" min="8" max="80" step="1" /></label>
+					<label>Enemy size <input id="setEnemyRadius" type="number" min="8" max="80" step="1" /></label>
+					<label>Player max speed <input id="setPlayerMaxSpeed" type="number" min="80" max="1000" step="10" /></label>
+					<label>Enemy min speed <input id="setEnemyMin" type="number" min="40" max="1600" step="10" /></label>
+					<label>Enemy max speed <input id="setEnemyMax" type="number" min="40" max="1600" step="10" /></label>
+					<label>Enemy spawn ms <input id="setSpawnMs" type="number" min="1000" max="60000" step="500" /></label>
+				</div>
+				<div class="row"><button id="applySettings">Apply</button></div>
+			</div>
+			<div id="joystick" class="joystick">
+				<div id="stick" class="stick"></div>
+			</div>
+		</div>
+	</div>
+	<script src="/socket.io/socket.io.js"></script>
+	<script src="/client.js"></script>
+</body>
+</html>
