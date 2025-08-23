@@ -120,6 +120,10 @@
 	function updateEnemyCount() {
 		if (!state || !enemyCountEl) return;
 		enemyCountEl.textContent = `Enemies: ${state.enemies.length}`;
+		// Show freeze badge in announcement area
+		if (state.freezeUntil && Date.now() < state.freezeUntil) {
+			announcementEl.textContent = 'Freeze active!';
+		}
 	}
 
 	function updateScoreboard() {
@@ -138,7 +142,7 @@
 			announcementEl.textContent = msg;
 		} else if (!state.roundRunning) {
 			announcementEl.textContent = 'Waiting for host to start...';
-		} else {
+		} else if (!(state.freezeUntil && Date.now() < state.freezeUntil)) {
 			announcementEl.textContent = '';
 		}
 	}
@@ -158,6 +162,35 @@
 	function radiusToScreen(r) {
 		const scale = Math.min(canvas.clientWidth / worldWidth, canvas.clientHeight / worldHeight);
 		return r * scale;
+	}
+
+	function drawPowerup(pu) {
+		const x = worldToScreenX(pu.x);
+		const y = worldToScreenY(pu.y);
+		const r = radiusToScreen(pu.r);
+		ctx.save();
+		switch (pu.type) {
+			case 'freeze':
+				ctx.fillStyle = '#60a5fa';
+				break;
+			case 'speed':
+				ctx.fillStyle = '#22c55e';
+				break;
+			case 'immortal':
+				ctx.fillStyle = '#f59e0b';
+				break;
+		}
+		ctx.beginPath();
+		ctx.arc(x, y, r, 0, Math.PI * 2);
+		ctx.fill();
+		// icon
+		ctx.fillStyle = '#0b132b';
+		ctx.font = `${Math.max(10, r)}px sans-serif`;
+		ctx.textAlign = 'center';
+		ctx.textBaseline = 'middle';
+		const icon = pu.type === 'freeze' ? '❄' : pu.type === 'speed' ? '⚡' : '⛨';
+		ctx.fillText(icon, x, y + 1);
+		ctx.restore();
 	}
 
 	function draw() {
@@ -181,16 +214,42 @@
 			ctx.fill();
 		}
 
+		for (const pu of (state.powerups || [])) {
+			drawPowerup(pu);
+		}
+
 		for (const p of state.players) {
 			const isMe = p.id === myId;
+			const x = worldToScreenX(p.x);
+			const y = worldToScreenY(p.y);
+			const r = radiusToScreen(p.r);
+			// aura effects
+			const now = Date.now();
+			if (p.immortalUntil && now < p.immortalUntil) {
+				ctx.beginPath();
+				ctx.arc(x, y, r + 6, 0, Math.PI * 2);
+				ctx.strokeStyle = '#f59e0b';
+				ctx.lineWidth = 3;
+				ctx.stroke();
+			}
+			if (p.speedBoostUntil && now < p.speedBoostUntil) {
+				ctx.beginPath();
+				ctx.arc(x, y, r + 10, 0, Math.PI * 2);
+				ctx.strokeStyle = '#22c55e';
+				ctx.lineWidth = 2;
+				ctx.setLineDash([6, 4]);
+				ctx.stroke();
+				ctx.setLineDash([]);
+			}
+
 			ctx.beginPath();
 			ctx.fillStyle = p.alive ? p.color : 'rgba(200,200,200,0.4)';
-			ctx.arc(worldToScreenX(p.x), worldToScreenY(p.y), radiusToScreen(p.r), 0, Math.PI * 2);
+			ctx.arc(x, y, r, 0, Math.PI * 2);
 			ctx.fill();
 			ctx.fillStyle = '#fff';
 			ctx.font = '12px system-ui, sans-serif';
 			ctx.textAlign = 'center';
-			ctx.fillText((isMe ? 'YOU - ' : '') + p.name, worldToScreenX(p.x), worldToScreenY(p.y) - radiusToScreen(p.r) - 6);
+			ctx.fillText((isMe ? 'YOU - ' : '') + p.name, x, y - r - 6);
 		}
 
 		requestAnimationFrame(draw);

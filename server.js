@@ -26,6 +26,15 @@ const DEFAULTS = {
 	friction: 0.9,
 };
 
+const POWERUP_RADIUS = 18;
+const POWERUP_LIFETIME_MS = 10000; // disappears if not picked in 10s
+const POWERUP_SPAWN_MIN_MS = 10000;
+const POWERUP_SPAWN_MAX_MS = 20000;
+const FREEZE_DURATION_MS = 3000;
+const SPEED_BOOST_MULTIPLIER = 1.5;
+const SPEED_BOOST_DURATION_MS = 10000;
+const IMMORTAL_DURATION_MS = 5000;
+
 // Rooms
 const rooms = new Map(); // roomId -> room
 
@@ -35,11 +44,14 @@ function createRoom(roomId) {
 		hostId: null,
 		players: new Map(), // socketId -> player
 		enemies: [],
+		powerups: [],
 		roundRunning: false,
 		enemyAdder: null,
 		winnerAnnouncementUntil: 0,
 		roundStartedPlayerCount: 0,
 		settings: { ...DEFAULTS },
+		freezeUntil: 0,
+		nextPowerupAt: 0,
 	};
 	rooms.set(roomId, room);
 	return room;
@@ -148,6 +160,23 @@ function createEnemy(room) {
 	};
 }
 
+function spawnPowerup(room) {
+	const now = Date.now();
+	const types = ['freeze', 'speed', 'immortal'];
+	const type = types[Math.floor(Math.random() * types.length)];
+	const pos = randomSpawn(POWERUP_RADIUS);
+	room.powerups.push({
+		id: randomUUID(),
+		type,
+		x: pos.x,
+		y: pos.y,
+		r: POWERUP_RADIUS,
+		expiresAt: now + POWERUP_LIFETIME_MS,
+	});
+	// schedule next spawn
+	room.nextPowerupAt = now + (POWERUP_SPAWN_MIN_MS + Math.floor(Math.random() * (POWERUP_SPAWN_MAX_MS - POWERUP_SPAWN_MIN_MS + 1)));
+}
+
 function resetPlayersForRound(room) {
 	for (const player of room.players.values()) {
 		const { x, y } = randomSpawn(room.settings.playerRadius);
@@ -157,6 +186,8 @@ function resetPlayersForRound(room) {
 		player.vy = 0;
 		player.r = room.settings.playerRadius;
 		player.alive = true;
+		player.speedBoostUntil = 0;
+		player.immortalUntil = 0;
 	}
 }
 
@@ -165,12 +196,15 @@ function startRound(room) {
 	// Allow solo starts (require at least 1 player)
 	if (room.players.size < 1) return;
 	room.enemies = [];
+	room.powerups = [];
 	resetPlayersForRound(room);
 	room.enemies.push(createEnemy(room));
 	room.enemies.push(createEnemy(room));
 	room.roundRunning = true;
 	room.winnerAnnouncementUntil = 0;
+	room.freezeUntil = 0;
 	room.roundStartedPlayerCount = room.players.size;
+	room.nextPowerupAt = Date.now() + (POWERUP_SPAWN_MIN_MS + Math.floor(Math.random() * (POWERUP_SPAWN_MAX_MS - POWERUP_SPAWN_MIN_MS + 1)));
 	if (room.enemyAdder) clearInterval(room.enemyAdder);
 	room.enemyAdder = setInterval(() => {
 		if (!room.roundRunning) return;
@@ -184,6 +218,7 @@ function endRound(room) {
 		clearInterval(room.enemyAdder);
 		room.enemyAdder = null;
 	}
+	room.powerups = [];
 	const alive = Array.from(room.players.values()).filter(p => p.alive);
 	if (alive.length === 1 && room.roundStartedPlayerCount >= 2) {
 		alive[0].score += 1;
@@ -192,21 +227,46 @@ function endRound(room) {
 	setTimeout(() => {}, 3000);
 }
 
+function isFreezeActive(room) {
+	return Date.now() < room.freezeUntil;
+}
+
+function applyPowerup(room, player, powerup) {
+	const now = Date.now();
+	switch (powerup.type) {
+		case 'freeze':
+			room.freezeUntil = now + FREEZE_DURATION_MS;
+			break;
+		case 'speed':
+			player.speedBoostUntil = now + SPEED_BOOST_DURATION_MS;
+			break;
+		case 'immortal':
+			player.immortalUntil = now + IMMORTAL_DURATION_MS;
+			break;
+	}
+}
+
 function tickPhysics(room, dt) {
-	const { playerMaxSpeed, playerAccel, friction } = room.settings;
+	const now = Date.now();
+	const freeze = isFreezeActive(room);
 	for (const player of room.players.values()) {
 		if (!player.alive) continue;
 		const input = player.input || { x: 0, y: 0 };
-		player.vx += input.x * playerAccel * dt;
-		player.vy += input.y * playerAccel * dt;
+		const hasBoost = now < (player.speedBoostUntil || 0);
+		const baseAccel = room.settings.playerAccel;
+		const baseMax = room.settings.playerMaxSpeed;
+		const accel = hasBoost ? baseAccel * SPEED_BOOST_MULTIPLIER : baseAccel;
+		const maxSpeed = hasBoost ? baseMax * SPEED_BOOST_MULTIPLIER : baseMax;
+		player.vx += input.x * accel * dt;
+		player.vy += input.y * accel * dt;
 		const speed = mag(player.vx, player.vy);
-		if (speed > playerMaxSpeed) {
-			const n = playerMaxSpeed / speed;
+		if (speed > maxSpeed) {
+			const n = maxSpeed / speed;
 			player.vx *= n;
 			player.vy *= n;
 		}
-		player.vx *= friction;
-		player.vy *= friction;
+		player.vx *= room.settings.friction;
+		player.vy *= room.settings.friction;
 	}
 
 	for (const player of room.players.values()) {
@@ -215,10 +275,13 @@ function tickPhysics(room, dt) {
 		player.y += player.vy * dt;
 		bounceOffWalls(player);
 	}
-	for (const enemy of room.enemies) {
-		enemy.x += enemy.vx * dt;
-		enemy.y += enemy.vy * dt;
-		bounceOffWalls(enemy);
+
+	if (!freeze) {
+		for (const enemy of room.enemies) {
+			enemy.x += enemy.vx * dt;
+			enemy.y += enemy.vy * dt;
+			bounceOffWalls(enemy);
+		}
 	}
 
 	const alivePlayers = Array.from(room.players.values()).filter(p => p.alive);
@@ -227,9 +290,11 @@ function tickPhysics(room, dt) {
 			resolveCircleCollision(alivePlayers[i], alivePlayers[j]);
 		}
 	}
-	for (let i = 0; i < room.enemies.length; i++) {
-		for (let j = i + 1; j < room.enemies.length; j++) {
-			resolveCircleCollision(room.enemies[i], room.enemies[j]);
+	if (!freeze) {
+		for (let i = 0; i < room.enemies.length; i++) {
+			for (let j = i + 1; j < room.enemies.length; j++) {
+				resolveCircleCollision(room.enemies[i], room.enemies[j]);
+			}
 		}
 	}
 	for (const enemy of room.enemies) {
@@ -239,10 +304,32 @@ function tickPhysics(room, dt) {
 			const dy = enemy.y - player.y;
 			const dist = Math.sqrt(dx * dx + dy * dy);
 			if (dist <= enemy.r + player.r) {
+				// If player is immortal, ignore kill
+				if (now < (player.immortalUntil || 0)) continue;
 				player.alive = false;
 				player.vx = 0; player.vy = 0;
 			}
 		}
+	}
+
+	// Powerups: expire and pickups
+	room.powerups = room.powerups.filter(pu => pu.expiresAt > now);
+	for (const pu of room.powerups.slice()) {
+		for (const player of room.players.values()) {
+			if (!player.alive) continue;
+			const dx = pu.x - player.x;
+			const dy = pu.y - player.y;
+			if (Math.sqrt(dx * dx + dy * dy) <= (pu.r + player.r)) {
+				applyPowerup(room, player, pu);
+				// remove from list
+				room.powerups = room.powerups.filter(x => x.id !== pu.id);
+				break;
+			}
+		}
+	}
+	// Spawn next powerup if time
+	if (room.roundRunning && now >= room.nextPowerupAt) {
+		spawnPowerup(room);
 	}
 
 	if (room.roundRunning) {
@@ -259,6 +346,7 @@ function buildState(room) {
 		world: { width: WORLD.width, height: WORLD.height },
 		roundRunning: room.roundRunning,
 		winnerAnnouncementUntil: room.winnerAnnouncementUntil,
+		freezeUntil: room.freezeUntil,
 		settings: room.settings,
 		players: Array.from(room.players.values()).map(p => ({
 			id: p.id,
@@ -269,8 +357,11 @@ function buildState(room) {
 			color: p.color,
 			alive: p.alive,
 			score: p.score,
+			speedBoostUntil: p.speedBoostUntil || 0,
+			immortalUntil: p.immortalUntil || 0,
 		})),
 		enemies: room.enemies.map(e => ({ id: e.id, x: e.x, y: e.y, r: e.r, color: e.color })),
+		powerups: room.powerups.map(pu => ({ id: pu.id, type: pu.type, x: pu.x, y: pu.y, r: pu.r, expiresAt: pu.expiresAt })),
 	};
 }
 
@@ -294,6 +385,8 @@ io.on('connection', (socket) => {
 		r: DEFAULTS.playerRadius,
 		alive: false,
 		score: 0,
+		speedBoostUntil: 0,
+		immortalUntil: 0,
 		input: { x: 0, y: 0 },
 	};
 
