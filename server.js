@@ -58,8 +58,12 @@ function removeEmptyRoom(roomId) {
 	}
 }
 
-function randomColor() {
-	const hue = Math.floor(Math.random() * 360);
+function randomPlayerColor() {
+	// Avoid red-like hues (wrap region around 0 deg). Exclude [330, 30].
+	let hue = Math.floor(Math.random() * 360);
+	if (hue >= 330 || hue <= 30) {
+		hue = (hue + 60) % 360; // shift away from red band
+	}
 	return `hsl(${hue}, 70%, 50%)`;
 }
 
@@ -158,7 +162,8 @@ function resetPlayersForRound(room) {
 
 function startRound(room) {
 	if (room.roundRunning) return;
-	if (room.players.size < 2) return;
+	// Allow solo starts (require at least 1 player)
+	if (room.players.size < 1) return;
 	room.enemies = [];
 	resetPlayersForRound(room);
 	room.enemies.push(createEnemy(room));
@@ -242,7 +247,8 @@ function tickPhysics(room, dt) {
 
 	if (room.roundRunning) {
 		const aliveCount = Array.from(room.players.values()).filter(p => p.alive).length;
-		if (aliveCount <= 1) endRound(room);
+		const shouldEnd = room.roundStartedPlayerCount >= 2 ? (aliveCount <= 1) : (aliveCount === 0);
+		if (shouldEnd) endRound(room);
 	}
 }
 
@@ -280,7 +286,7 @@ io.on('connection', (socket) => {
 	const player = {
 		id: socket.id,
 		name: `Player-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`,
-		color: randomColor(),
+		color: randomPlayerColor(),
 		x: 0,
 		y: 0,
 		vx: 0,
@@ -341,16 +347,21 @@ io.on('connection', (socket) => {
 		if (room.roundRunning) return; // only before round starts
 		if (!payload || typeof payload !== 'object') return;
 		const s = room.settings;
-		// Validate and apply
-		if (typeof payload.playerRadius === 'number') s.playerRadius = clamp(Math.round(payload.playerRadius), 8, 80);
-		if (typeof payload.enemyRadius === 'number') s.enemyRadius = clamp(Math.round(payload.enemyRadius), 8, 80);
-		if (typeof payload.playerMaxSpeed === 'number') s.playerMaxSpeed = clamp(Math.round(payload.playerMaxSpeed), 80, 1000);
-		if (typeof payload.enemySpeedMin === 'number') s.enemySpeedMin = clamp(Math.round(payload.enemySpeedMin), 40, 1200);
-		if (typeof payload.enemySpeedMax === 'number') s.enemySpeedMax = clamp(Math.round(payload.enemySpeedMax), s.enemySpeedMin, 1600);
-		if (typeof payload.enemySpawnIntervalMs === 'number') s.enemySpawnIntervalMs = clamp(Math.round(payload.enemySpawnIntervalMs), 1000, 60000);
-		// Optionally keep acceleration proportional to max speed
+		function applyFinite(key, value, min, max, round = true) {
+			if (typeof value !== 'number' || !Number.isFinite(value)) return;
+			const v = round ? Math.round(value) : value;
+			s[key] = Math.max(min, Math.min(max, v));
+		}
+		applyFinite('playerRadius', payload.playerRadius, 8, 80, true);
+		applyFinite('enemyRadius', payload.enemyRadius, 8, 80, true);
+		applyFinite('playerMaxSpeed', payload.playerMaxSpeed, 80, 1000, true);
+		applyFinite('enemySpeedMin', payload.enemySpeedMin, 40, 1600, true);
+		applyFinite('enemySpeedMax', payload.enemySpeedMax, 40, 1600, true);
+		applyFinite('enemySpawnIntervalMs', payload.enemySpawnIntervalMs, 500, 60000, true);
+		if (s.enemySpeedMax < s.enemySpeedMin) s.enemySpeedMax = s.enemySpeedMin;
 		s.playerAccel = Math.max(400, Math.min(4000, Math.round(s.playerMaxSpeed * 3.5)));
 		io.to(room.id).emit('state', buildState(room));
+		socket.emit('settingsUpdated', { settings: room.settings });
 	});
 
 	socket.on('input', (vec) => {

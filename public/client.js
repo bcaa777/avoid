@@ -13,6 +13,7 @@
 	const roomInfo = document.getElementById('roomInfo');
 	const startBtn = document.getElementById('startBtn');
 	const hostControls = document.getElementById('hostControls');
+	const settingsToggle = document.getElementById('settingsToggle');
 	const settingsPanel = document.getElementById('settingsPanel');
 	const setPlayerRadius = document.getElementById('setPlayerRadius');
 	const setEnemyRadius = document.getElementById('setEnemyRadius');
@@ -21,6 +22,7 @@
 	const setEnemyMax = document.getElementById('setEnemyMax');
 	const setSpawnMs = document.getElementById('setSpawnMs');
 	const applySettings = document.getElementById('applySettings');
+	const enemyCountEl = document.getElementById('enemyCount');
 
 	let socket = null;
 	let myId = null;
@@ -28,6 +30,9 @@
 	let input = { x: 0, y: 0 };
 	let worldWidth = 900;
 	let worldHeight = 1600;
+	let editingSettings = false;
+	let pendingSettings = null;
+	let settingsInitialized = false;
 
 	function resizeCanvas() {
 		const dpr = window.devicePixelRatio || 1;
@@ -49,6 +54,7 @@
 		socket.on('roomJoined', ({ roomId, hostId }) => {
 			menu.style.display = 'none';
 			roomInfo.textContent = `Room: ${roomId}`;
+			settingsInitialized = false; // new room → re-init when state arrives
 			updateHostControls(hostId);
 		});
 		socket.on('roomError', ({ message }) => {
@@ -61,28 +67,59 @@
 			updateScoreboard();
 			updateAnnouncement();
 			updateHostControls(s.hostId);
-			prefillSettings();
+			if (!pendingSettings && !settingsInitialized) {
+				prefillSettings();
+				settingsInitialized = true;
+			}
+			updateEnemyCount();
+		});
+		socket.on('settingsUpdated', ({ settings }) => {
+			pendingSettings = null;
+			if (!settings) return;
+			if (!editingSettings) {
+				setPlayerRadius.value = settings.playerRadius;
+				setEnemyRadius.value = settings.enemyRadius;
+				setPlayerMaxSpeed.value = settings.playerMaxSpeed;
+				setEnemyMin.value = settings.enemySpeedMin;
+				setEnemyMax.value = settings.enemySpeedMax;
+				setSpawnMs.value = settings.enemySpawnIntervalMs;
+			}
+			settingsInitialized = true;
 		});
 	}
 
 	function updateHostControls(hostId) {
 		const isHost = hostId === myId;
 		hostControls.classList.toggle('hidden', !isHost);
-		settingsPanel.classList.toggle('hidden', !isHost);
+		if (!isHost) settingsPanel.classList.add('hidden');
 	}
+
+	function attachEditListeners() {
+		[setPlayerRadius, setEnemyRadius, setPlayerMaxSpeed, setEnemyMin, setEnemyMax, setSpawnMs].forEach(el => {
+			el.addEventListener('focus', () => editingSettings = true);
+			el.addEventListener('blur', () => editingSettings = false);
+		});
+	}
+	attachEditListeners();
 
 	function prefillSettings() {
 		if (!state || !state.settings) return;
-		setPlayerRadius.value = state.settings.playerRadius;
-		setEnemyRadius.value = state.settings.enemyRadius;
-		setPlayerMaxSpeed.value = state.settings.playerMaxSpeed;
-		setEnemyMin.value = state.settings.enemySpeedMin;
-		setEnemyMax.value = state.settings.enemySpeedMax;
-		setSpawnMs.value = state.settings.enemySpawnIntervalMs;
-		// Disable inputs during running
+		if (!editingSettings) {
+			setPlayerRadius.value = state.settings.playerRadius;
+			setEnemyRadius.value = state.settings.enemyRadius;
+			setPlayerMaxSpeed.value = state.settings.playerMaxSpeed;
+			setEnemyMin.value = state.settings.enemySpeedMin;
+			setEnemyMax.value = state.settings.enemySpeedMax;
+			setSpawnMs.value = state.settings.enemySpawnIntervalMs;
+		}
 		const disabled = !!state.roundRunning;
 		[setPlayerRadius, setEnemyRadius, setPlayerMaxSpeed, setEnemyMin, setEnemyMax, setSpawnMs, applySettings]
 			.forEach(el => el.disabled = disabled);
+	}
+
+	function updateEnemyCount() {
+		if (!state || !enemyCountEl) return;
+		enemyCountEl.textContent = `Enemies: ${state.enemies.length}`;
 	}
 
 	function updateScoreboard() {
@@ -106,7 +143,6 @@
 		}
 	}
 
-	// Maintain fixed world scaling regardless of screen size
 	function worldToScreenX(x) {
 		const scale = Math.min(canvas.clientWidth / worldWidth, canvas.clientHeight / worldHeight);
 		const viewW = worldWidth * scale;
@@ -130,7 +166,6 @@
 		ctx.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight);
 		if (!state) return requestAnimationFrame(draw);
 
-		// Letterbox area for fixed world
 		const scale = Math.min(canvas.clientWidth / worldWidth, canvas.clientHeight / worldHeight);
 		const viewW = worldWidth * scale;
 		const viewH = worldHeight * scale;
@@ -139,7 +174,6 @@
 		ctx.strokeStyle = 'rgba(255,255,255,0.1)';
 		ctx.strokeRect(offsetX, offsetY, viewW, viewH);
 
-		// Enemies
 		for (const e of state.enemies) {
 			ctx.beginPath();
 			ctx.fillStyle = e.color || '#e63946';
@@ -147,7 +181,6 @@
 			ctx.fill();
 		}
 
-		// Players
 		for (const p of state.players) {
 			const isMe = p.id === myId;
 			ctx.beginPath();
@@ -164,7 +197,6 @@
 	}
 	requestAnimationFrame(draw);
 
-	// Connect immediately to allow lobby actions
 	connect();
 
 	function ensureName() {
@@ -184,20 +216,31 @@
 	startBtn.addEventListener('click', () => {
 		socket.emit('hostStart');
 	});
+	settingsToggle.addEventListener('click', () => {
+		settingsPanel.classList.toggle('hidden');
+	});
 	applySettings.addEventListener('click', () => {
 		if (!state) return;
-		const payload = {
-			playerRadius: Number(setPlayerRadius.value),
-			enemyRadius: Number(setEnemyRadius.value),
-			playerMaxSpeed: Number(setPlayerMaxSpeed.value),
-			enemySpeedMin: Number(setEnemyMin.value),
-			enemySpeedMax: Number(setEnemyMax.value),
-			enemySpawnIntervalMs: Number(setSpawnMs.value),
+		const payload = {};
+		const addIfValid = (key, valStr) => {
+			if (valStr === '' || valStr === null || valStr === undefined) return;
+			const n = Number(valStr);
+			if (Number.isFinite(n)) payload[key] = n;
 		};
+		addIfValid('playerRadius', setPlayerRadius.value);
+		addIfValid('enemyRadius', setEnemyRadius.value);
+		addIfValid('playerMaxSpeed', setPlayerMaxSpeed.value);
+		addIfValid('enemySpeedMin', setEnemyMin.value);
+		addIfValid('enemySpeedMax', setEnemyMax.value);
+		addIfValid('enemySpawnIntervalMs', setSpawnMs.value);
+		if (payload.enemySpeedMin !== undefined && payload.enemySpeedMax !== undefined && payload.enemySpeedMax < payload.enemySpeedMin) {
+			payload.enemySpeedMax = payload.enemySpeedMin;
+		}
+		pendingSettings = payload;
+		settingsInitialized = true; // freeze current inputs until ack
 		socket.emit('updateSettings', payload);
 	});
 
-	// Keyboard input
 	const keys = new Set();
 	function recomputeKeyboardInput() {
 		let x = 0, y = 0;
@@ -212,7 +255,6 @@
 	window.addEventListener('keydown', (e) => { keys.add(e.key); recomputeKeyboardInput(); });
 	window.addEventListener('keyup', (e) => { keys.delete(e.key); recomputeKeyboardInput(); });
 
-	// Touch joystick
 	let joyActive = false;
 	let joyStart = { x: 0, y: 0 };
 	const baseRect = () => joystick.getBoundingClientRect();
