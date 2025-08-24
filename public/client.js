@@ -23,6 +23,9 @@
 	const setSpawnMs = document.getElementById('setSpawnMs');
 	const applySettings = document.getElementById('applySettings');
 	const enemyCountEl = document.getElementById('enemyCount');
+	const victoryPanel = document.getElementById('victoryPanel');
+	const victoryList = document.getElementById('victoryList');
+	const restartGameBtn = document.getElementById('restartGame');
 
 	let socket = null;
 	let myId = null;
@@ -74,6 +77,7 @@
 			}
 			updateEnemyCount();
 			updateTopbarVisibility();
+			updateVictoryPanel();
 		});
 		socket.on('settingsUpdated', ({ settings }) => {
 			pendingSettings = null;
@@ -182,7 +186,7 @@
 		const host = document.getElementById('hostControls');
 		const room = document.getElementById('roomInfo');
 		const settingsBtn = document.getElementById('settingsToggle');
-		if (running) {
+		if (running || state.gameOver) {
 			room.classList.add('hide-during-round');
 			host.classList.add('hide-during-round');
 			settingsBtn.classList.add('hide-during-round');
@@ -190,6 +194,23 @@
 			room.classList.remove('hide-during-round');
 			host.classList.remove('hide-during-round');
 			settingsBtn.classList.remove('hide-during-round');
+		}
+	}
+
+	function updateVictoryPanel() {
+		if (!state) return;
+		if (state.gameOver) {
+			victoryPanel.classList.remove('hidden');
+			const list = (state.finalStandings || []).map((p, idx) => {
+				const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}.`;
+				return `<div>${medal} ${p.name} — ${p.score}</div>`;
+			}).join('');
+			victoryList.innerHTML = list || '<div>No players</div>';
+			// Enable restart for host only
+			restartGameBtn.disabled = state.hostId !== myId;
+		} else {
+			victoryPanel.classList.add('hidden');
+			victoryList.innerHTML = '';
 		}
 	}
 
@@ -221,6 +242,12 @@
 			case 'immortal':
 				ctx.fillStyle = '#f59e0b';
 				break;
+			case 'bomb':
+				ctx.fillStyle = '#ef4444';
+				break;
+			case 'shrink':
+				ctx.fillStyle = '#a78bfa';
+				break;
 		}
 		ctx.beginPath();
 		ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -230,9 +257,30 @@
 		ctx.font = `${Math.max(10, r)}px sans-serif`;
 		ctx.textAlign = 'center';
 		ctx.textBaseline = 'middle';
-		const icon = pu.type === 'freeze' ? '❄' : pu.type === 'speed' ? '⚡' : '⛨';
+		const icon = pu.type === 'freeze' ? '❄' : pu.type === 'speed' ? '⚡' : pu.type === 'bomb' ? '💣' : pu.type === 'shrink' ? '⇲' : '⛨';
 		ctx.fillText(icon, x, y + 1);
 		ctx.restore();
+	}
+
+	function drawExplosions() {
+		if (!state || !state.explosions) return;
+		const now = Date.now();
+		for (const ex of state.explosions) {
+			const age = now - ex.createdAt;
+			const life = 600; // ms visual lifetime
+			if (age < 0 || age > life) continue;
+			const t = age / life;
+			const alpha = 1 - t;
+			const baseR = radiusToScreen(ex.radius);
+			const ringR = baseR * (0.9 + 0.3 * t);
+			ctx.save();
+			ctx.strokeStyle = `rgba(239,68,68,${alpha})`;
+			ctx.lineWidth = Math.max(1, 6 * (1 - t));
+			ctx.beginPath();
+			ctx.arc(worldToScreenX(ex.x), worldToScreenY(ex.y), ringR, 0, Math.PI * 2);
+			ctx.stroke();
+			ctx.restore();
+		}
 	}
 
 	function draw() {
@@ -261,19 +309,21 @@
 		for (const pu of (state.powerups || [])) {
 			drawPowerup(pu);
 		}
+		drawExplosions();
 		for (const pt of (state.points || [])) {
 			const x = worldToScreenX(pt.x);
 			const y = worldToScreenY(pt.y);
 			const r = radiusToScreen(pt.r);
 			ctx.beginPath();
-			ctx.fillStyle = '#fde047';
+			const col = pt.value >= 5 ? '#f472b6' : pt.value >= 2 ? '#fb923c' : '#fde047';
+			ctx.fillStyle = col;
 			ctx.arc(x, y, r, 0, Math.PI * 2);
 			ctx.fill();
 			ctx.fillStyle = '#0b132b';
 			ctx.font = `${Math.max(10, r)}px sans-serif`;
 			ctx.textAlign = 'center';
 			ctx.textBaseline = 'middle';
-			ctx.fillText('+1', x, y + 1);
+			ctx.fillText('+' + (pt.value || 1), x, y + 1);
 		}
 
 		for (const p of state.players) {
@@ -412,4 +462,9 @@
 	});
 	joystick.addEventListener('pointerup', () => { joyActive = false; centerStick(); });
 	joystick.addEventListener('pointercancel', () => { joyActive = false; centerStick(); });
+
+	restartGameBtn.addEventListener('click', () => {
+		if (!socket) return;
+		socket.emit('hostRestartGame');
+	});
 })();

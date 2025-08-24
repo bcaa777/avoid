@@ -41,6 +41,20 @@ const POINT_RADIUS = 14;
 const POINT_LIFETIME_MS = 5000;
 const POINT_SPAWN_MIN_MS = 5000;
 const POINT_SPAWN_MAX_MS = 10000;
+// Add weighted values for points (rarer higher values)
+const POINT_VALUE_WEIGHTS = [
+	{ value: 1, weight: 0.85 },
+	{ value: 2, weight: 0.13 },
+	{ value: 5, weight: 0.02 },
+];
+function pickPointValue() {
+	const total = POINT_VALUE_WEIGHTS.reduce((s, it) => s + it.weight, 0);
+	let r = Math.random() * total;
+	for (const it of POINT_VALUE_WEIGHTS) {
+		if ((r -= it.weight) <= 0) return it.value;
+	}
+	return 1;
+}
 
 // Rooms
 const rooms = new Map(); // roomId -> room
@@ -61,6 +75,9 @@ function createRoom(roomId) {
 		freezeUntil: 0,
 		nextPowerupAt: 0,
 		nextPointAt: 0,
+		gameOver: false,
+		finalStandings: [],
+		explosions: [], // {id,x,y,radius,createdAt}
 	};
 	rooms.set(roomId, room);
 	return room;
@@ -172,7 +189,7 @@ function createEnemy(room) {
 
 function spawnPowerup(room) {
 	const now = Date.now();
-	const types = ['freeze', 'speed', 'immortal'];
+	const types = ['freeze', 'speed', 'immortal', 'bomb', 'shrink'];
 	const type = types[Math.floor(Math.random() * types.length)];
 	const pos = randomSpawn(POWERUP_RADIUS);
 	room.powerups.push({
@@ -194,6 +211,7 @@ function spawnPoint(room) {
 		x: pos.x,
 		y: pos.y,
 		r: POINT_RADIUS,
+		value: pickPointValue(),
 		expiresAt: now + POINT_LIFETIME_MS,
 	});
 	room.nextPointAt = now + (POINT_SPAWN_MIN_MS + Math.floor(Math.random() * (POINT_SPAWN_MAX_MS - POINT_SPAWN_MIN_MS + 1)));
@@ -236,6 +254,21 @@ function startRound(room) {
 	}, room.settings.enemySpawnIntervalMs);
 }
 
+function computeStandings(room) {
+	return Array.from(room.players.values())
+		.sort((a, b) => b.score - a.score)
+		.map(p => ({ id: p.id, name: p.name, score: p.score }));
+}
+function endGame(room) {
+	room.roundRunning = false;
+	if (room.enemyAdder) { clearInterval(room.enemyAdder); room.enemyAdder = null; }
+	room.gameOver = true;
+	room.finalStandings = computeStandings(room);
+	room.winnerAnnouncementUntil = 0;
+	room.freezeUntil = 0;
+	io.to(room.id).emit('state', buildState(room));
+}
+
 function endRound(room) {
 	room.roundRunning = false;
 	if (room.enemyAdder) {
@@ -247,6 +280,7 @@ function endRound(room) {
 	const alive = Array.from(room.players.values()).filter(p => p.alive);
 	if (alive.length === 1 && room.roundStartedPlayerCount >= 2) {
 		alive[0].score += 10; // winner gets 10 points
+		if (alive[0].score >= 100) { endGame(room); return; }
 		room.winnerAnnouncementUntil = Date.now() + 3000;
 	}
 	setTimeout(() => {}, 3000);
@@ -267,6 +301,22 @@ function applyPowerup(room, player, powerup) {
 		case 'immortal':
 			player.shield = true; // consume on first hit
 			break;
+		case 'bomb': {
+			const blastR = (room.settings.enemyRadius || 20) * 5;
+			const cx = powerup.x;
+			const cy = powerup.y;
+			room.enemies = room.enemies.filter(e => {
+				const dx = e.x - cx;
+				const dy = e.y - cy;
+				return Math.sqrt(dx * dx + dy * dy) > (blastR + e.r * 0.5);
+			});
+			room.explosions.push({ id: randomUUID(), x: cx, y: cy, radius: blastR, createdAt: Date.now() });
+			break;
+		}
+		case 'shrink': {
+			player.shrinkUntil = Date.now() + 10000; // 10s shrink
+			break;
+		}
 	}
 }
 
@@ -277,6 +327,7 @@ function tickPhysics(room, dt) {
 		if (!player.alive) continue;
 		const input = player.input || { x: 0, y: 0 };
 		const hasBoost = now < (player.speedBoostUntil || 0);
+		const shrunk = now < (player.shrinkUntil || 0);
 		const baseAccel = room.settings.playerAccel;
 		const baseMax = room.settings.playerMaxSpeed;
 		const accel = hasBoost ? baseAccel * SPEED_BOOST_MULTIPLIER : baseAccel;
@@ -291,6 +342,8 @@ function tickPhysics(room, dt) {
 		}
 		player.vx *= room.settings.friction;
 		player.vy *= room.settings.friction;
+		// apply shrink size
+		player.r = shrunk ? Math.max(8, Math.round(room.settings.playerRadius * 0.5)) : room.settings.playerRadius;
 	}
 
 	for (const player of room.players.values()) {
@@ -330,12 +383,22 @@ function tickPhysics(room, dt) {
 			if (dist <= enemy.r + player.r) {
 				// ignore if enemy in spawn protection
 				if (now < (enemy.spawnSafeUntil || 0)) continue;
-				// If player has shield, consume and bounce enemy away
+				// invulnerability frames prevent kill
+				if (now < (player.invincibleUntil || 0)) continue;
+				// If player has shield, consume and knock enemy away, grant brief i-frames
 				if (player.shield) {
 					player.shield = false;
+					player.invincibleUntil = now + 450; // ~0.45s i-frames
 					const nx = (dx || 0.0001) / (dist || 1);
 					const ny = (dy || 0.0001) / (dist || 1);
-					const bounceSpeed = Math.max(room.settings.enemySpeedMin, Math.min(room.settings.enemySpeedMax, Math.hypot(enemy.vx, enemy.vy))) * 1.2;
+					// Reposition enemy just outside player to avoid immediate re-collision
+					const separation = player.r + enemy.r + 2;
+					enemy.x = player.x + nx * separation;
+					enemy.y = player.y + ny * separation;
+					// Stronger bounce away
+					const currentSpeed = Math.hypot(enemy.vx, enemy.vy);
+					const baseSpeed = Math.max(room.settings.enemySpeedMin, Math.min(room.settings.enemySpeedMax, currentSpeed));
+					const bounceSpeed = baseSpeed * 1.6;
 					enemy.vx = nx * bounceSpeed;
 					enemy.vy = ny * bounceSpeed;
 					continue;
@@ -363,16 +426,19 @@ function tickPhysics(room, dt) {
 	// Points: expire and pickups
 	room.points = room.points.filter(pt => pt.expiresAt > now);
 	for (const pt of room.points.slice()) {
+		let ended = false;
 		for (const player of room.players.values()) {
 			if (!player.alive) continue;
 			const dx = pt.x - player.x;
 			const dy = pt.y - player.y;
 			if (Math.sqrt(dx * dx + dy * dy) <= (pt.r + player.r)) {
-				player.score += 1;
+				player.score += (pt.value || 1);
+				if (player.score >= 100) { endGame(room); ended = true; break; }
 				room.points = room.points.filter(x => x.id !== pt.id);
 				break;
 			}
 		}
+		if (ended) break;
 	}
 	// Spawns
 	if (room.roundRunning && now >= room.nextPowerupAt) spawnPowerup(room);
@@ -393,6 +459,9 @@ function buildState(room) {
 		roundRunning: room.roundRunning,
 		winnerAnnouncementUntil: room.winnerAnnouncementUntil,
 		freezeUntil: room.freezeUntil,
+		gameOver: !!room.gameOver,
+		finalStandings: room.finalStandings || [],
+		explosions: room.explosions.slice(-6),
 		settings: room.settings,
 		players: Array.from(room.players.values()).map(p => ({
 			id: p.id,
@@ -405,10 +474,11 @@ function buildState(room) {
 			score: p.score,
 			speedBoostUntil: p.speedBoostUntil || 0,
 			shield: !!p.shield,
+			shrinkUntil: p.shrinkUntil || 0,
 		})),
 		enemies: room.enemies.map(e => ({ id: e.id, x: e.x, y: e.y, r: e.r, color: e.color, spawnSafeUntil: e.spawnSafeUntil || 0 })),
 		powerups: room.powerups.map(pu => ({ id: pu.id, type: pu.type, x: pu.x, y: pu.y, r: pu.r, expiresAt: pu.expiresAt })),
-		points: room.points.map(pt => ({ id: pt.id, x: pt.x, y: pt.y, r: pt.r, expiresAt: pt.expiresAt })),
+		points: room.points.map(pt => ({ id: pt.id, x: pt.x, y: pt.y, r: pt.r, value: pt.value || 1, expiresAt: pt.expiresAt })),
 	};
 }
 
@@ -434,6 +504,8 @@ io.on('connection', (socket) => {
 		score: 0,
 		speedBoostUntil: 0,
 		shield: false,
+		invincibleUntil: 0,
+		shrinkUntil: 0,
 		input: { x: 0, y: 0 },
 	};
 
@@ -526,6 +598,33 @@ io.on('connection', (socket) => {
 		}
 		io.to(room.id).emit('state', buildState(room));
 		removeEmptyRoom(room.id);
+	});
+
+	socket.on('hostRestartGame', () => {
+		if (!currentRoomId) return;
+		const room = getRoom(currentRoomId);
+		if (!room || room.hostId !== socket.id) return;
+		// reset room state
+		room.roundRunning = false;
+		room.gameOver = false;
+		room.enemies = [];
+		room.powerups = [];
+		room.points = [];
+		room.winnerAnnouncementUntil = 0;
+		room.freezeUntil = 0;
+		room.nextPowerupAt = 0;
+		room.nextPointAt = 0;
+		if (room.enemyAdder) { clearInterval(room.enemyAdder); room.enemyAdder = null; }
+		for (const p of room.players.values()) {
+			p.score = 0;
+			p.alive = false;
+			p.vx = 0; p.vy = 0;
+			p.speedBoostUntil = 0;
+			p.shield = false;
+			p.invincibleUntil = 0;
+		}
+		room.finalStandings = [];
+		io.to(room.id).emit('state', buildState(room));
 	});
 });
 

@@ -61,3 +61,6 @@ body { background: radial-gradient(1200px 800px at 20% 10%, #1e3a8a 0%, #111427 
 }
 
 .hide-during-round { display: none !important; }
+
+#victoryPanel { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(420px, 92vw); }
+#victoryPanel #victoryList { display: grid; gap: 6px; margin: 8px 0; }
