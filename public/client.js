@@ -3,6 +3,7 @@
 	const ctx = canvas.getContext('2d');
 	const menu = document.getElementById('menu');
 	const nameInput = document.getElementById('nameInput');
+	const emojiInput = document.getElementById('emojiInput');
 	const createBtn = document.getElementById('createBtn');
 	const joinBtn = document.getElementById('joinBtn');
 	const roomInput = document.getElementById('roomInput');
@@ -27,6 +28,21 @@
 	const victoryList = document.getElementById('victoryList');
 	const restartGameBtn = document.getElementById('restartGame');
 
+	// Prefill emoji from localStorage and send updates immediately when changed
+	function sendEmoji() {
+		if (!socket || !emojiInput) return;
+		const val = (emojiInput.value || '').trim();
+		if (!val) return;
+		localStorage.setItem('playerEmoji', val);
+		socket.emit('setEmoji', val);
+	}
+	if (emojiInput) {
+		const savedEmoji = localStorage.getItem('playerEmoji');
+		if (savedEmoji && !emojiInput.value) emojiInput.value = savedEmoji;
+		emojiInput.addEventListener('input', sendEmoji);
+		emojiInput.addEventListener('change', sendEmoji);
+	}
+
 	let socket = null;
 	let myId = null;
 	let state = null;
@@ -36,6 +52,15 @@
 	let editingSettings = false;
 	let pendingSettings = null;
 	let settingsInitialized = false;
+	// Visual effect state
+	let prevState = null;
+	let currentShake = { x: 0, y: 0 };
+	const particles = [];
+	let lastGameOverAt = 0;
+	let lastExplosionIds = new Set();
+	// Postprocess glow buffer
+	const glowCanvas = document.createElement('canvas');
+	const glowCtx = glowCanvas.getContext('2d');
 
 	function resizeCanvas() {
 		const dpr = window.devicePixelRatio || 1;
@@ -44,6 +69,9 @@
 		canvas.style.width = window.innerWidth + 'px';
 		canvas.style.height = window.innerHeight + 'px';
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+		// glow buffer in CSS pixels to match drawing coordinates
+		glowCanvas.width = canvas.clientWidth;
+		glowCanvas.height = canvas.clientHeight;
 	}
 	window.addEventListener('resize', resizeCanvas);
 	resizeCanvas();
@@ -53,6 +81,8 @@
 		socket.on('init', (data) => {
 			myId = data.id;
 			if (nameInput.value.trim()) socket.emit('setName', nameInput.value.trim());
+			if (emojiInput && emojiInput.value.trim()) socket.emit('setEmoji', emojiInput.value.trim());
+			else sendEmoji();
 		});
 		socket.on('roomJoined', ({ roomId, hostId }) => {
 			menu.style.display = 'none';
@@ -60,11 +90,14 @@
 			settingsInitialized = false; // new room → re-init when state arrives
 			updateHostControls(hostId);
 			document.getElementById('hud').classList.remove('hidden');
+			sendEmoji();
 		});
 		socket.on('roomError', ({ message }) => {
 			alert(message || 'Room error');
 		});
 		socket.on('state', (s) => {
+			// Keep previous snapshot for local-only effects
+			prevState = state;
 			state = s;
 			worldWidth = s.world.width;
 			worldHeight = s.world.height;
@@ -78,6 +111,10 @@
 			updateEnemyCount();
 			updateTopbarVisibility();
 			updateVictoryPanel();
+			// Confetti triggers
+			triggerEffects(prevState, state);
+			// Spawn local particles for pickups and deaths
+			spawnPickupAndDeathParticles(prevState, state);
 		});
 		socket.on('settingsUpdated', ({ settings }) => {
 			pendingSettings = null;
@@ -216,15 +253,64 @@
 
 	function worldToScreenX(x) {
 		const v = computeView();
-		return v.offsetX + x * v.scale;
+		return v.offsetX + currentShake.x + x * v.scale;
 	}
 	function worldToScreenY(y) {
 		const v = computeView();
-		return v.offsetY + y * v.scale;
+		return v.offsetY + currentShake.y + y * v.scale;
 	}
 	function radiusToScreen(r) {
 		const v = computeView();
 		return r * v.scale;
+	}
+
+	// ===== Visual helpers =====
+	function roundRectPath(x, y, w, h, r) {
+		const rr = Math.min(r, Math.min(w, h) / 2);
+		ctx.beginPath();
+		ctx.moveTo(x + rr, y);
+		ctx.arcTo(x + w, y, x + w, y + h, rr);
+		ctx.arcTo(x + w, y + h, x, y + h, rr);
+		ctx.arcTo(x, y + h, x, y, rr);
+		ctx.arcTo(x, y, x + w, y, rr);
+		ctx.closePath();
+	}
+
+	function drawWorldBackground() {
+		const v = computeView();
+		const x = v.offsetX + currentShake.x;
+		const y = v.offsetY + currentShake.y;
+		const w = v.viewW;
+		const h = v.viewH;
+		// Panel background
+		const grad = ctx.createLinearGradient(x, y, x + w, y + h);
+		grad.addColorStop(0, 'rgba(255,255,255,0.04)');
+		grad.addColorStop(1, 'rgba(0,0,0,0.10)');
+		ctx.save();
+		roundRectPath(x, y, w, h, Math.max(12, Math.min(w, h) * 0.02));
+		ctx.fillStyle = grad;
+		ctx.fill();
+		ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+		ctx.lineWidth = 2;
+		ctx.stroke();
+		// Subtle grid
+		ctx.clip();
+		ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+		ctx.lineWidth = 1;
+		const lines = 14;
+		for (let i = 1; i < lines; i++) {
+			const xx = x + (w / lines) * i;
+			ctx.beginPath(); ctx.moveTo(xx, y); ctx.lineTo(xx, y + h); ctx.stroke();
+			const yy = y + (h / lines) * i;
+			ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + w, yy); ctx.stroke();
+		}
+		// Vignette
+		const vg = ctx.createRadialGradient(x + w / 2, y + h / 2, Math.min(w, h) * 0.4, x + w / 2, y + h / 2, Math.max(w, h) * 0.7);
+		vg.addColorStop(0, 'rgba(0,0,0,0)');
+		vg.addColorStop(1, 'rgba(0,0,0,0.20)');
+		ctx.fillStyle = vg;
+		ctx.fillRect(x, y, w, h);
+		ctx.restore();
 	}
 
 	function drawPowerup(pu) {
@@ -283,54 +369,344 @@
 		}
 	}
 
+	function drawHitbox(x, y, radius, color) {
+		ctx.save();
+		ctx.beginPath();
+		ctx.arc(x, y, radius, 0, Math.PI * 2);
+		ctx.strokeStyle = color;
+		ctx.lineWidth = Math.max(2, Math.floor(radius * 0.15));
+		ctx.stroke();
+		ctx.restore();
+	}
+
+	// Glowing orb under emojis
+	function drawGlowingOrb(x, y, r, fillColor, glowColor) {
+		ctx.save();
+		// base glow + fill (reduced blur for clearer center)
+		ctx.shadowColor = glowColor;
+		ctx.shadowBlur = Math.max(6, r * 0.5);
+		ctx.fillStyle = fillColor;
+		ctx.beginPath();
+		ctx.arc(x, y, r, 0, Math.PI * 2);
+		ctx.fill();
+		// bloom overlay (softer)
+		const rg = ctx.createRadialGradient(x, y, Math.max(1, r * 0.18), x, y, r);
+		rg.addColorStop(0, 'rgba(255,255,255,0.12)');
+		rg.addColorStop(1, 'rgba(255,255,255,0)');
+		ctx.fillStyle = rg;
+		ctx.beginPath();
+		ctx.arc(x, y, r, 0, Math.PI * 2);
+		ctx.fill();
+		// subtle rim light
+		ctx.shadowBlur = 0;
+		ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+		ctx.lineWidth = Math.max(1, r * 0.07);
+		ctx.beginPath();
+		ctx.arc(x, y, r, 0, Math.PI * 2);
+		ctx.stroke();
+		ctx.restore();
+	}
+
+	// Particles
+	function spawnBurst(screenX, screenY, color, count = 14) {
+		for (let i = 0; i < count; i++) {
+			const a = Math.random() * Math.PI * 2;
+			const sp = 1 + Math.random() * 3;
+			particles.push({
+				x: screenX,
+				y: screenY,
+				vx: Math.cos(a) * sp,
+				vy: Math.sin(a) * sp,
+				life: 600 + Math.random() * 300,
+				age: 0,
+				size: 2 + Math.random() * 2,
+				color,
+			});
+		}
+	}
+	function updateAndDrawParticles(dtMs) {
+		for (let i = particles.length - 1; i >= 0; i--) {
+			const p = particles[i];
+			p.age += dtMs;
+			if (p.age >= p.life) { particles.splice(i, 1); continue; }
+			p.x += p.vx;
+			p.y += p.vy;
+			p.vx *= 0.98; p.vy *= 0.98;
+			const t = p.age / p.life;
+			ctx.save();
+			ctx.globalAlpha = 1 - t;
+			ctx.fillStyle = p.color;
+			ctx.beginPath();
+			ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+			ctx.fill();
+			ctx.restore();
+		}
+	}
+
+	function spawnPickupAndDeathParticles(prev, curr) {
+		if (!prev || !curr) return;
+		// Points removed (picked or expired)
+		const prevPts = new Map((prev.points || []).map(pt => [pt.id, pt]));
+		for (const pt of (curr.points || [])) prevPts.delete(pt.id);
+		for (const gone of prevPts.values()) {
+			const x = worldToScreenX(gone.x); const y = worldToScreenY(gone.y);
+			const col = (gone.value || 1) >= 5 ? '#f472b6' : (gone.value || 1) >= 2 ? '#fb923c' : '#fde047';
+			spawnBurst(x, y, col, 18);
+			// confetti for big point
+			if (typeof confetti === 'function' && (gone.value || 1) >= 5) {
+				confetti({ particleCount: 18, spread: 30, startVelocity: 25, origin: { x: x / canvas.clientWidth, y: y / canvas.clientHeight } });
+			}
+		}
+		// Powerups removed (picked or expired)
+		const prevPu = new Map((prev.powerups || []).map(pu => [pu.id, pu]));
+		for (const pu of (curr.powerups || [])) prevPu.delete(pu.id);
+		for (const gone of prevPu.values()) {
+			const x = worldToScreenX(gone.x); const y = worldToScreenY(gone.y);
+			const col = gone.type === 'freeze' ? '#60a5fa' : gone.type === 'speed' ? '#22c55e' : gone.type === 'bomb' ? '#ef4444' : gone.type === 'shrink' ? '#a78bfa' : '#f59e0b';
+			spawnBurst(x, y, col, 16);
+			if (typeof confetti === 'function') {
+				confetti({ particleCount: 16, spread: 20, startVelocity: 20, scalar: 0.6, origin: { x: x / canvas.clientWidth, y: y / canvas.clientHeight } });
+			}
+		}
+		// Player deaths
+		const prevPl = new Map((prev.players || []).map(p => [p.id, p]));
+		for (const cur of (curr.players || [])) {
+			const old = prevPl.get(cur.id);
+			if (old && old.alive && !cur.alive) {
+				const x = worldToScreenX(cur.x); const y = worldToScreenY(cur.y);
+				spawnBurst(x, y, '#ef4444', 20);
+			}
+		}
+	}
+
+	function triggerEffects(prev, curr) {
+		if (!curr) return;
+		// Game over confetti fanfare (once per game)
+		if (curr.gameOver) {
+			const now = Date.now();
+			if (now - lastGameOverAt > 2000 && typeof confetti === 'function') {
+				lastGameOverAt = now;
+				const duration = 1200;
+				const end = now + duration;
+				(function frame() {
+					confetti({ particleCount: 2, angle: 60, spread: 55, origin: { x: 0 }, scalar: 0.9 });
+					confetti({ particleCount: 2, angle: 120, spread: 55, origin: { x: 1 }, scalar: 0.9 });
+					if (Date.now() < end) requestAnimationFrame(frame);
+				})();
+			}
+		}
+		// Explosion confetti (subtle paper bits) for new explosions
+		const currIds = new Set((curr.explosions || []).map(e => e.id));
+		for (const id of currIds) {
+			if (!lastExplosionIds.has(id)) {
+				const ex = (curr.explosions || []).find(e => e.id === id);
+				if (ex && typeof confetti === 'function') {
+					const x = worldToScreenX(ex.x) / canvas.clientWidth;
+					const y = worldToScreenY(ex.y) / canvas.clientHeight;
+					confetti({ particleCount: 12, spread: 40, startVelocity: 18, scalar: 0.5, origin: { x, y } });
+				}
+			}
+		}
+		lastExplosionIds = currIds;
+	}
+
+	function computeShake() {
+		currentShake.x = 0; currentShake.y = 0;
+		if (!state || !state.explosions || state.explosions.length === 0) return;
+		const now = Date.now();
+		let amp = 0;
+		for (const ex of state.explosions) {
+			const age = now - ex.createdAt;
+			const life = 400;
+			if (age < 0 || age > life) continue;
+			const t = 1 - age / life;
+			amp = Math.max(amp, 8 * t);
+		}
+		if (amp > 0) {
+			currentShake.x = (Math.random() * 2 - 1) * amp;
+			currentShake.y = (Math.random() * 2 - 1) * amp;
+		}
+	}
+
+	function renderGlowSources() {
+		glowCtx.clearRect(0, 0, glowCanvas.width, glowCanvas.height);
+		if (!state) return;
+		// world background highlight (reduced)
+		const v = computeView();
+		glowCtx.save();
+		glowCtx.fillStyle = 'rgba(255,255,255,0.02)';
+		glowCtx.fillRect(v.offsetX + currentShake.x, v.offsetY + currentShake.y, v.viewW, v.viewH);
+		glowCtx.restore();
+		// enemies (ring gradient, transparent center)
+		for (const e of state.enemies) {
+			const x = worldToScreenX(e.x);
+			const y = worldToScreenY(e.y);
+			const r = Math.max(6, radiusToScreen(e.r));
+			const g = glowCtx.createRadialGradient(x, y, Math.max(1, r * 0.45), x, y, r);
+			g.addColorStop(0, 'rgba(239,68,68,0)');
+			g.addColorStop(0.7, 'rgba(239,68,68,0.75)');
+			g.addColorStop(1, 'rgba(239,68,68,0)');
+			glowCtx.fillStyle = g;
+			glowCtx.beginPath(); glowCtx.arc(x, y, r, 0, Math.PI * 2); glowCtx.fill();
+		}
+		// powerups (slightly reduced fill)
+		for (const pu of (state.powerups || [])) {
+			const x = worldToScreenX(pu.x);
+			const y = worldToScreenY(pu.y);
+			const r = Math.max(5, radiusToScreen(pu.r));
+			const colMid = pu.type === 'freeze' ? 'rgba(96,165,250,0.6)' : pu.type === 'speed' ? 'rgba(34,197,94,0.6)' : pu.type === 'bomb' ? 'rgba(239,68,68,0.65)' : pu.type === 'shrink' ? 'rgba(167,139,250,0.6)' : 'rgba(245,158,11,0.6)';
+			const g = glowCtx.createRadialGradient(x, y, Math.max(1, r * 0.4), x, y, r);
+			g.addColorStop(0, 'rgba(0,0,0,0)');
+			g.addColorStop(0.75, colMid);
+			g.addColorStop(1, 'rgba(0,0,0,0)');
+			glowCtx.fillStyle = g;
+			glowCtx.beginPath(); glowCtx.arc(x, y, r, 0, Math.PI * 2); glowCtx.fill();
+		}
+		// points (reduced)
+		for (const pt of (state.points || [])) {
+			const x = worldToScreenX(pt.x);
+			const y = worldToScreenY(pt.y);
+			const r = Math.max(4, radiusToScreen(pt.r));
+			const col = pt.value >= 5 ? 'rgba(244,114,182,0.55)' : pt.value >= 2 ? 'rgba(251,146,60,0.52)' : 'rgba(253,224,71,0.5)';
+			const g = glowCtx.createRadialGradient(x, y, Math.max(1, r * 0.35), x, y, r);
+			g.addColorStop(0, 'rgba(0,0,0,0)');
+			g.addColorStop(0.8, col);
+			g.addColorStop(1, 'rgba(0,0,0,0)');
+			glowCtx.fillStyle = g;
+			glowCtx.beginPath(); glowCtx.arc(x, y, r, 0, Math.PI * 2); glowCtx.fill();
+		}
+		// players (ring gradient using player color)
+		for (const p of state.players) {
+			const x = worldToScreenX(p.x);
+			const y = worldToScreenY(p.y);
+			const r = Math.max(6, radiusToScreen(p.r));
+			const base = (p.color || 'hsl(140,70%,50%)');
+			// try to convert hsl/hsl string to rgba by overlaying a greenish alpha
+			const mid = 'rgba(34,197,94,0.68)';
+			const g = glowCtx.createRadialGradient(x, y, Math.max(1, r * 0.45), x, y, r);
+			g.addColorStop(0, 'rgba(0,0,0,0)');
+			g.addColorStop(0.7, mid);
+			g.addColorStop(1, 'rgba(0,0,0,0)');
+			glowCtx.fillStyle = g;
+			glowCtx.beginPath(); glowCtx.arc(x, y, r, 0, Math.PI * 2); glowCtx.fill();
+		}
+		// explosions (unchanged stroke, but uses postblur)
+		for (const ex of (state.explosions || [])) {
+			const age = Date.now() - ex.createdAt;
+			if (age > 600) continue;
+			glowCtx.beginPath();
+			glowCtx.strokeStyle = 'rgba(239,68,68,0.75)';
+			glowCtx.lineWidth = Math.max(5, radiusToScreen(ex.radius) * 0.18);
+			glowCtx.arc(worldToScreenX(ex.x), worldToScreenY(ex.y), Math.max(8, radiusToScreen(ex.radius) * 0.8), 0, Math.PI * 2);
+			glowCtx.stroke();
+		}
+	}
+
+	function compositeGlow() {
+		ctx.save();
+		ctx.globalCompositeOperation = 'lighter';
+		ctx.filter = 'blur(10px)';
+		ctx.drawImage(glowCanvas, 0, 0);
+		ctx.filter = 'blur(3px)';
+		ctx.drawImage(glowCanvas, 0, 0);
+		ctx.filter = 'none';
+		ctx.globalCompositeOperation = 'source-over';
+		ctx.restore();
+	}
+
 	function draw() {
+		const frameStart = performance.now();
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
 		ctx.fillStyle = '#0b132b';
 		ctx.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight);
 		if (!state) return requestAnimationFrame(draw);
 
+		// Camera shake from recent explosions
+		computeShake();
+		// World background panel
+		drawWorldBackground();
+
 		const v = computeView();
 		ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-		ctx.strokeRect(v.offsetX, v.offsetY, v.viewW, v.viewH);
+		ctx.strokeRect(v.offsetX + currentShake.x, v.offsetY + currentShake.y, v.viewW, v.viewH);
 
 		const now = Date.now();
 		for (const e of state.enemies) {
-			// blink if spawn protected
 			const protectedNow = e.spawnSafeUntil && now < e.spawnSafeUntil;
-			if (protectedNow && Math.floor(now / 150) % 2 === 0) {
-				continue; // skip draw to blink
+			const ex = worldToScreenX(e.x);
+			const ey = worldToScreenY(e.y);
+			const r = radiusToScreen(e.r);
+			// filled glowing orb
+			drawGlowingOrb(ex, ey, r, (e.color || '#ef4444'), 'rgba(239,68,68,0.55)');
+			if (protectedNow) {
+				const pulse = 0.7 + 0.3 * Math.sin(now / 120);
+				ctx.save();
+				ctx.beginPath();
+				ctx.arc(ex, ey, r + 6 * pulse, 0, Math.PI * 2);
+				ctx.strokeStyle = `rgba(255,255,255,${0.6 * pulse})`;
+				ctx.lineWidth = 2;
+				ctx.setLineDash([6, 4]);
+				ctx.stroke();
+				ctx.setLineDash([]);
+				ctx.restore();
 			}
-			ctx.beginPath();
-			ctx.fillStyle = e.color || '#e63946';
-			ctx.arc(worldToScreenX(e.x), worldToScreenY(e.y), radiusToScreen(e.r), 0, Math.PI * 2);
-			ctx.fill();
+			// dark inner backdrop for emoji legibility
+			ctx.save();
+			ctx.fillStyle = 'rgba(0,0,0,0.28)';
+			ctx.beginPath(); ctx.arc(ex, ey, r * 0.62, 0, Math.PI * 2); ctx.fill();
+			ctx.restore();
+			ctx.save();
+			ctx.font = `${Math.max(14, r * 1.6)}px system-ui, apple color emoji, segoe ui emoji`;
+			ctx.textAlign = 'center';
+			ctx.textBaseline = 'middle';
+			ctx.shadowColor = 'rgba(0,0,0,0.55)';
+			ctx.shadowBlur = Math.max(4, r * 0.5);
+			ctx.shadowOffsetY = Math.max(1, Math.floor(r * 0.10));
+			ctx.shadowOffsetX = 0;
+			ctx.fillText(e.emoji || '👾', ex, ey + 1);
+			ctx.restore();
 		}
 
 		for (const pu of (state.powerups || [])) {
-			drawPowerup(pu);
+			const x = worldToScreenX(pu.x);
+			const y = worldToScreenY(pu.y);
+			const r = radiusToScreen(pu.r);
+			drawHitbox(x, y, r, '#eab308');
+			const pulse = 0.9 + 0.2 * Math.sin(now / 160 + (pu.id.charCodeAt(0) % 10));
+			ctx.save();
+			ctx.font = `${Math.max(14, r * 1.8 * pulse)}px system-ui, apple color emoji, segoe ui emoji`;
+			ctx.textAlign = 'center';
+			ctx.textBaseline = 'middle';
+			ctx.shadowColor = 'rgba(255,255,255,0.35)';
+			ctx.shadowBlur = 12;
+			const icon = pu.type === 'freeze' ? '❄️' : pu.type === 'speed' ? '⚡' : pu.type === 'bomb' ? '💣' : pu.type === 'shrink' ? '↘️' : '🛡️';
+			ctx.fillText(icon, x, y + 1);
+			ctx.restore();
 		}
 		drawExplosions();
 		for (const pt of (state.points || [])) {
 			const x = worldToScreenX(pt.x);
 			const y = worldToScreenY(pt.y);
 			const r = radiusToScreen(pt.r);
+			// draw circle for visibility
 			ctx.beginPath();
 			const col = pt.value >= 5 ? '#f472b6' : pt.value >= 2 ? '#fb923c' : '#fde047';
 			ctx.fillStyle = col;
 			ctx.arc(x, y, r, 0, Math.PI * 2);
 			ctx.fill();
 			ctx.fillStyle = '#0b132b';
-			ctx.font = `${Math.max(10, r)}px sans-serif`;
+			ctx.font = `${Math.max(12, r)}px system-ui, sans-serif`;
 			ctx.textAlign = 'center';
 			ctx.textBaseline = 'middle';
 			ctx.fillText('+' + (pt.value || 1), x, y + 1);
 		}
-
 		for (const p of state.players) {
 			const isMe = p.id === myId;
 			const x = worldToScreenX(p.x);
 			const y = worldToScreenY(p.y);
 			const r = radiusToScreen(p.r);
+			// filled glowing orb using player color
+			drawGlowingOrb(x, y, r, (p.color || '#22c55e'), 'rgba(34,197,94,0.5)');
 			// aura effects
 			if (p.shield) {
 				ctx.beginPath();
@@ -348,16 +724,34 @@
 				ctx.stroke();
 				ctx.setLineDash([]);
 			}
-
-			ctx.beginPath();
-			ctx.fillStyle = p.alive ? p.color : 'rgba(200,200,200,0.4)';
-			ctx.arc(x, y, r, 0, Math.PI * 2);
-			ctx.fill();
+			// dark inner backdrop for emoji legibility
+			ctx.save();
+			ctx.fillStyle = 'rgba(0,0,0,0.28)';
+			ctx.beginPath(); ctx.arc(x, y, r * 0.62, 0, Math.PI * 2); ctx.fill();
+			ctx.restore();
+			// draw player emoji with stronger drop shadow onto circle
+			ctx.save();
+			ctx.font = `${Math.max(16, r * 1.6)}px system-ui, apple color emoji, segoe ui emoji`;
+			ctx.textAlign = 'center';
+			ctx.shadowColor = 'rgba(0,0,0,0.6)';
+			ctx.shadowBlur = Math.max(4, r * 0.5);
+			ctx.shadowOffsetY = Math.max(1, Math.floor(r * 0.10));
+			ctx.shadowOffsetX = 0;
+			ctx.fillText(p.emoji || '🙂', x, y + 1);
+			ctx.restore();
 			ctx.fillStyle = '#fff';
 			ctx.font = '12px system-ui, sans-serif';
 			ctx.textAlign = 'center';
 			ctx.fillText((isMe ? 'YOU - ' : '') + p.name, x, y - r - 6);
 		}
+
+		// Postprocess glow compose
+		renderGlowSources();
+		compositeGlow();
+
+		// Particles update/draw (approximate dt from frame time)
+		const frameEnd = performance.now();
+		updateAndDrawParticles(frameEnd - frameStart);
 
 		requestAnimationFrame(draw);
 	}
@@ -367,6 +761,7 @@
 
 	function ensureName() {
 		if (nameInput.value.trim()) socket.emit('setName', nameInput.value.trim());
+		if (emojiInput && emojiInput.value.trim()) socket.emit('setEmoji', emojiInput.value.trim());
 	}
 
 	createBtn.addEventListener('click', () => {
@@ -405,6 +800,8 @@
 		pendingSettings = payload;
 		settingsInitialized = true; // freeze current inputs until ack
 		socket.emit('updateSettings', payload);
+		// auto-hide settings panel on apply
+		settingsPanel.classList.add('hidden');
 	});
 
 	const keys = new Set();

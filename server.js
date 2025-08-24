@@ -104,6 +104,8 @@ function randomPlayerColor() {
 	}
 	return `hsl(${hue}, 70%, 50%)`;
 }
+const ENEMY_EMOJIS = ['👾','🧟','🕷️','👻'];
+const DEFAULT_PLAYER_EMOJI = '🙂';
 
 function randomSpawn(radius) {
 	return {
@@ -184,6 +186,7 @@ function createEnemy(room) {
 		r: enemyRadius,
 		color: '#e63946',
 		spawnSafeUntil: Date.now() + ENEMY_SPAWN_SAFE_MS,
+		emoji: ENEMY_EMOJIS[Math.floor(Math.random() * ENEMY_EMOJIS.length)],
 	};
 }
 
@@ -475,8 +478,9 @@ function buildState(room) {
 			speedBoostUntil: p.speedBoostUntil || 0,
 			shield: !!p.shield,
 			shrinkUntil: p.shrinkUntil || 0,
+			emoji: p.emoji || DEFAULT_PLAYER_EMOJI,
 		})),
-		enemies: room.enemies.map(e => ({ id: e.id, x: e.x, y: e.y, r: e.r, color: e.color, spawnSafeUntil: e.spawnSafeUntil || 0 })),
+		enemies: room.enemies.map(e => ({ id: e.id, x: e.x, y: e.y, r: e.r, color: e.color, spawnSafeUntil: e.spawnSafeUntil || 0, emoji: e.emoji || '👾' })),
 		powerups: room.powerups.map(pu => ({ id: pu.id, type: pu.type, x: pu.x, y: pu.y, r: pu.r, expiresAt: pu.expiresAt })),
 		points: room.points.map(pt => ({ id: pt.id, x: pt.x, y: pt.y, r: pt.r, value: pt.value || 1, expiresAt: pt.expiresAt })),
 	};
@@ -506,6 +510,7 @@ io.on('connection', (socket) => {
 		shield: false,
 		invincibleUntil: 0,
 		shrinkUntil: 0,
+		emoji: DEFAULT_PLAYER_EMOJI,
 		input: { x: 0, y: 0 },
 	};
 
@@ -516,6 +521,17 @@ io.on('connection', (socket) => {
 			player.name = newName.trim().slice(0, 24);
 			if (currentRoomId) io.to(currentRoomId).emit('state', buildState(getRoom(currentRoomId)));
 		}
+	});
+
+	socket.on('setEmoji', (emoji) => {
+		if (typeof emoji !== 'string') return;
+		let trimmed = emoji.trim();
+		if (!trimmed) return;
+		// Convert to array of Unicode code points and limit length
+		const codepoints = Array.from(trimmed);
+		const limited = codepoints.slice(0, 2).join('');
+		player.emoji = limited || DEFAULT_PLAYER_EMOJI;
+		if (currentRoomId) io.to(currentRoomId).emit('state', buildState(getRoom(currentRoomId)));
 	});
 
 	socket.on('createRoom', () => {
