@@ -147,21 +147,38 @@
 		}
 	}
 
-	function worldToScreenX(x) {
-		const scale = Math.min(canvas.clientWidth / worldWidth, canvas.clientHeight / worldHeight);
+	function safeInsets() {
+		// Approximate safe areas: top for topbar, bottom for joystick
+		const top = 60; // px reserved for top bar
+		const bottom = 180; // px reserved for joystick area
+		const left = 12;
+		const right = 12;
+		return { top, bottom, left, right };
+	}
+
+	function computeView() {
+		const insets = safeInsets();
+		const availW = canvas.clientWidth - (insets.left + insets.right);
+		const availH = canvas.clientHeight - (insets.top + insets.bottom);
+		const scale = Math.min(availW / worldWidth, availH / worldHeight);
 		const viewW = worldWidth * scale;
-		const offsetX = (canvas.clientWidth - viewW) / 2;
-		return offsetX + x * scale;
+		const viewH = worldHeight * scale;
+		const offsetX = insets.left + (availW - viewW) / 2;
+		const offsetY = insets.top + (availH - viewH) / 2;
+		return { scale, viewW, viewH, offsetX, offsetY };
+	}
+
+	function worldToScreenX(x) {
+		const v = computeView();
+		return v.offsetX + x * v.scale;
 	}
 	function worldToScreenY(y) {
-		const scale = Math.min(canvas.clientWidth / worldWidth, canvas.clientHeight / worldHeight);
-		const viewH = worldHeight * scale;
-		const offsetY = (canvas.clientHeight - viewH) / 2;
-		return offsetY + y * scale;
+		const v = computeView();
+		return v.offsetY + y * v.scale;
 	}
 	function radiusToScreen(r) {
-		const scale = Math.min(canvas.clientWidth / worldWidth, canvas.clientHeight / worldHeight);
-		return r * scale;
+		const v = computeView();
+		return r * v.scale;
 	}
 
 	function drawPowerup(pu) {
@@ -199,13 +216,9 @@
 		ctx.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight);
 		if (!state) return requestAnimationFrame(draw);
 
-		const scale = Math.min(canvas.clientWidth / worldWidth, canvas.clientHeight / worldHeight);
-		const viewW = worldWidth * scale;
-		const viewH = worldHeight * scale;
-		const offsetX = (canvas.clientWidth - viewW) / 2;
-		const offsetY = (canvas.clientHeight - viewH) / 2;
+		const v = computeView();
 		ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-		ctx.strokeRect(offsetX, offsetY, viewW, viewH);
+		ctx.strokeRect(v.offsetX, v.offsetY, v.viewW, v.viewH);
 
 		for (const e of state.enemies) {
 			ctx.beginPath();
