@@ -152,8 +152,8 @@
 		// Approximate safe areas: top for topbar, bottom for joystick
 		const top = 60; // px reserved for top bar
 		const bottom = 180; // px reserved for joystick area
-		const left = 12;
-		const right = 12;
+		const left = 0;
+		const right = 0;
 		return { top, bottom, left, right };
 	}
 

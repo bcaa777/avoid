@@ -330,9 +330,14 @@ function tickPhysics(room, dt) {
 			if (dist <= enemy.r + player.r) {
 				// ignore if enemy in spawn protection
 				if (now < (enemy.spawnSafeUntil || 0)) continue;
-				// If player has shield, consume it instead of death
+				// If player has shield, consume and bounce enemy away
 				if (player.shield) {
 					player.shield = false;
+					const nx = (dx || 0.0001) / (dist || 1);
+					const ny = (dy || 0.0001) / (dist || 1);
+					const bounceSpeed = Math.max(room.settings.enemySpeedMin, Math.min(room.settings.enemySpeedMax, Math.hypot(enemy.vx, enemy.vy))) * 1.2;
+					enemy.vx = nx * bounceSpeed;
+					enemy.vy = ny * bounceSpeed;
 					continue;
 				}
 				player.alive = false;
