@@ -22,16 +22,18 @@ body { background: radial-gradient(1200px 800px at 20% 10%, #1e3a8a 0%, #111427 
 #menu .row.join input { flex: 1; }
 #menu .hint { margin-top: 8px; font-size: 12px; opacity: 0.9; color: #cbd5e1; }
 
-#game { width: 100vw; height: 100vh; display: block; }
+#game { width: 100vw; height: 100vh; display: block; margin: 0; }
 
 #hud { position: fixed; inset: 0; pointer-events: none; }
-#topbar { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; align-items: center; background: var(--glass); padding: 8px 10px; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.25), inset 0 0 0 1px var(--glass-strong); }
+#topbar { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; gap: 12px; align-items: center; background: var(--glass); padding: 8px 10px; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.25), inset 0 0 0 1px var(--glass-strong); pointer-events: auto; }
 #roomInfo { font-size: 14px; color: #f1f5f9; }
 #hostControls { display: flex; gap: 8px; }
 #hostControls button { pointer-events: auto; padding: 8px 12px; border-radius: 10px; border: 1px solid transparent; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; }
 #hostControls #startBtn { background: linear-gradient(135deg, var(--success), #16a34a); color: #071317; box-shadow: 0 6px 16px rgba(22,163,74,0.35); }
 #hostControls #settingsToggle { background: linear-gradient(135deg, var(--accent), #06b6d4); color: #00222a; box-shadow: 0 6px 16px rgba(6,182,212,0.35); }
 .hidden { display: none; }
+
+#enemyCount { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); }
 
 .badge { pointer-events: none; padding: 6px 10px; border-radius: 999px; background: linear-gradient(135deg, #ef4444, #f59e0b); color: #111; font-weight: 800; text-transform: uppercase; font-size: 12px; box-shadow: 0 6px 16px rgba(239,68,68,0.35); }
 

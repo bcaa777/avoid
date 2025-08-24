@@ -29,7 +29,7 @@
 	let state = null;
 	let input = { x: 0, y: 0 };
 	let worldWidth = 900;
-	let worldHeight = 1600;
+	let worldHeight = 1200;
 	let editingSettings = false;
 	let pendingSettings = null;
 	let settingsInitialized = false;
@@ -56,6 +56,7 @@
 			roomInfo.textContent = `Room: ${roomId}`;
 			settingsInitialized = false; // new room → re-init when state arrives
 			updateHostControls(hostId);
+			document.getElementById('hud').classList.remove('hidden');
 		});
 		socket.on('roomError', ({ message }) => {
 			alert(message || 'Room error');
@@ -149,9 +150,8 @@
 	}
 
 	function safeInsets() {
-		// Approximate safe areas: top for topbar, bottom for joystick
-		const top = 60; // px reserved for top bar
-		const bottom = 180; // px reserved for joystick area
+		const top = 0;
+		const bottom = 0;
 		const left = 0;
 		const right = 0;
 		return { top, bottom, left, right };

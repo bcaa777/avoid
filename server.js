@@ -12,7 +12,7 @@ const io = new Server(server);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Game constants (mobile-first portrait)
-const WORLD = { width: 900, height: 1600 };
+const WORLD = { width: 900, height: 1100 };
 const TICK_RATE = 60;
 const BROADCAST_RATE = 30;
 const DEFAULTS = {
