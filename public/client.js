@@ -72,6 +72,7 @@
 				settingsInitialized = true;
 			}
 			updateEnemyCount();
+			updateTopbarVisibility();
 		});
 		socket.on('settingsUpdated', ({ settings }) => {
 			pendingSettings = null;
@@ -160,12 +161,36 @@
 		const insets = safeInsets();
 		const availW = canvas.clientWidth - (insets.left + insets.right);
 		const availH = canvas.clientHeight - (insets.top + insets.bottom);
-		const scale = Math.min(availW / worldWidth, availH / worldHeight);
-		const viewW = worldWidth * scale;
-		const viewH = worldHeight * scale;
+		// Prefer width-based scaling to maximize horizontal usage
+		let scale = availW / worldWidth;
+		let viewW = worldWidth * scale;
+		let viewH = worldHeight * scale;
+		if (viewH > availH) {
+			// fallback to height if overflow
+			scale = availH / worldHeight;
+			viewW = worldWidth * scale;
+			viewH = worldHeight * scale;
+		}
 		const offsetX = insets.left + (availW - viewW) / 2;
 		const offsetY = insets.top + (availH - viewH) / 2;
 		return { scale, viewW, viewH, offsetX, offsetY };
+	}
+
+	function updateTopbarVisibility() {
+		if (!state) return;
+		const running = !!state.roundRunning;
+		const host = document.getElementById('hostControls');
+		const room = document.getElementById('roomInfo');
+		const settingsBtn = document.getElementById('settingsToggle');
+		if (running) {
+			room.classList.add('hide-during-round');
+			host.classList.add('hide-during-round');
+			settingsBtn.classList.add('hide-during-round');
+		} else {
+			room.classList.remove('hide-during-round');
+			host.classList.remove('hide-during-round');
+			settingsBtn.classList.remove('hide-during-round');
+		}
 	}
 
 	function worldToScreenX(x) {
@@ -220,7 +245,13 @@
 		ctx.strokeStyle = 'rgba(255,255,255,0.1)';
 		ctx.strokeRect(v.offsetX, v.offsetY, v.viewW, v.viewH);
 
+		const now = Date.now();
 		for (const e of state.enemies) {
+			// blink if spawn protected
+			const protectedNow = e.spawnSafeUntil && now < e.spawnSafeUntil;
+			if (protectedNow && Math.floor(now / 150) % 2 === 0) {
+				continue; // skip draw to blink
+			}
 			ctx.beginPath();
 			ctx.fillStyle = e.color || '#e63946';
 			ctx.arc(worldToScreenX(e.x), worldToScreenY(e.y), radiusToScreen(e.r), 0, Math.PI * 2);
@@ -230,6 +261,20 @@
 		for (const pu of (state.powerups || [])) {
 			drawPowerup(pu);
 		}
+		for (const pt of (state.points || [])) {
+			const x = worldToScreenX(pt.x);
+			const y = worldToScreenY(pt.y);
+			const r = radiusToScreen(pt.r);
+			ctx.beginPath();
+			ctx.fillStyle = '#fde047';
+			ctx.arc(x, y, r, 0, Math.PI * 2);
+			ctx.fill();
+			ctx.fillStyle = '#0b132b';
+			ctx.font = `${Math.max(10, r)}px sans-serif`;
+			ctx.textAlign = 'center';
+			ctx.textBaseline = 'middle';
+			ctx.fillText('+1', x, y + 1);
+		}
 
 		for (const p of state.players) {
 			const isMe = p.id === myId;
@@ -237,8 +282,7 @@
 			const y = worldToScreenY(p.y);
 			const r = radiusToScreen(p.r);
 			// aura effects
-			const now = Date.now();
-			if (p.immortalUntil && now < p.immortalUntil) {
+			if (p.shield) {
 				ctx.beginPath();
 				ctx.arc(x, y, r + 6, 0, Math.PI * 2);
 				ctx.strokeStyle = '#f59e0b';

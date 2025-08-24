@@ -35,7 +35,7 @@ body { background: radial-gradient(1200px 800px at 20% 10%, #1e3a8a 0%, #111427 
 
 .badge { pointer-events: none; padding: 6px 10px; border-radius: 999px; background: linear-gradient(135deg, #ef4444, #f59e0b); color: #111; font-weight: 800; text-transform: uppercase; font-size: 12px; box-shadow: 0 6px 16px rgba(239,68,68,0.35); }
 
-#scoreboard { position: absolute; top: 12px; left: 12px; background: var(--glass); padding: 8px 10px; border-radius: 12px; font-size: 14px; line-height: 1.2; box-shadow: 0 6px 20px rgba(0,0,0,0.25), inset 0 0 0 1px var(--glass-strong); }
+#scoreboard { position: absolute; bottom: 12px; left: 12px; background: var(--glass); padding: 8px 10px; border-radius: 12px; font-size: 14px; line-height: 1.2; box-shadow: 0 6px 20px rgba(0,0,0,0.25), inset 0 0 0 1px var(--glass-strong); }
 #announcement { position: absolute; top: 12px; right: 12px; background: var(--glass); padding: 8px 10px; border-radius: 12px; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,0.25), inset 0 0 0 1px var(--glass-strong); }
 
 .panel { position: absolute; top: 56px; right: 12px; width: min(320px, 90vw); background: var(--glass); padding: 12px 14px; border-radius: 14px; pointer-events: auto; box-shadow: 0 12px 30px rgba(0,0,0,0.3), inset 0 0 0 1px var(--glass-strong); }
@@ -57,3 +57,5 @@ body { background: radial-gradient(1200px 800px at 20% 10%, #1e3a8a 0%, #111427 
 @media (max-width: 520px) {
 	.panel { top: auto; bottom: 80px; right: 12px; left: 12px; width: auto; }
 }
+
+.hide-during-round { display: none !important; }
