@@ -374,15 +374,15 @@
 		const now = Date.now();
 		for (const ex of state.explosions) {
 			const age = now - ex.createdAt;
-			const life = 600; // ms visual lifetime
+			const life = 900; // longer lifetime
 			if (age < 0 || age > life) continue;
 			const t = age / life;
 			const alpha = 1 - t;
 			const baseR = radiusToScreen(ex.radius);
 			const ringR = baseR * (0.9 + 0.3 * t);
 			ctx.save();
-			ctx.strokeStyle = `rgba(239,68,68,${alpha})`;
-			ctx.lineWidth = Math.max(1, 6 * (1 - t));
+			ctx.strokeStyle = `rgba(239,68,68,${Math.max(0, alpha)})`;
+			ctx.lineWidth = Math.max(2, 8 * (1 - t));
 			ctx.beginPath();
 			ctx.arc(worldToScreenX(ex.x), worldToScreenY(ex.y), ringR, 0, Math.PI * 2);
 			ctx.stroke();
@@ -739,6 +739,16 @@
 				ctx.lineWidth = 3;
 				ctx.stroke();
 			}
+			// bump boost aura
+			if (p.bumpBoostUntil && now < p.bumpBoostUntil) {
+				ctx.beginPath();
+				ctx.arc(x, y, r + 12, 0, Math.PI * 2);
+				ctx.strokeStyle = '#eab308';
+				ctx.lineWidth = 3;
+				ctx.setLineDash([4, 3]);
+				ctx.stroke();
+				ctx.setLineDash([]);
+			}
 			if (p.speedBoostUntil && now < p.speedBoostUntil) {
 				ctx.beginPath();
 				ctx.arc(x, y, r + 10, 0, Math.PI * 2);
@@ -844,6 +854,7 @@
 	window.addEventListener('keydown', (e) => {
 		keys.add(e.key);
 		if (e.key === 'Shift' || e.code === 'Space') {
+			e.preventDefault();
 			if (socket) socket.emit('dash');
 		}
 		recomputeKeyboardInput();

@@ -35,7 +35,7 @@ const SPEED_BOOST_MULTIPLIER = 1.5;
 const SPEED_BOOST_DURATION_MS = 10000;
 // Bump boost powerup (player vs player knockback advantage)
 const BUMP_BOOST_MULTIPLIER = 5;
-const BUMP_BOOST_DURATION_MS = 10000;
+const BUMP_BOOST_DURATION_MS = 5000;
 // Base bump strength for player-vs-player collisions
 const PLAYER_BUMP_BASE_MULTIPLIER = 2;
 // Dash mechanic
@@ -671,6 +671,12 @@ io.on('connection', (socket) => {
 		if (!player.alive) return;
 		player.dashUntil = now + DASH_DURATION_MS;
 		player.dashReadyAt = now + DASH_COOLDOWN_MS;
+		// Instant impulse in facing/move direction
+		const dir = normalize(player.vx || player.input.x, player.vy || player.input.y);
+		const speed = Math.max(1, mag(player.vx, player.vy));
+		const impulse = Math.max(220, speed * 0.8);
+		player.vx += dir.x * impulse;
+		player.vy += dir.y * impulse;
 	});
 
 	socket.on('disconnect', () => {
