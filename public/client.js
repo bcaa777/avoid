@@ -27,6 +27,7 @@
 	const victoryPanel = document.getElementById('victoryPanel');
 	const victoryList = document.getElementById('victoryList');
 	const restartGameBtn = document.getElementById('restartGame');
+	const dashBtn = document.getElementById('dashBtn');
 
 	// Prefill emoji from localStorage and send updates immediately when changed
 	function sendEmoji() {
@@ -115,6 +116,7 @@
 			}
 			updateEnemyCount();
 			updateTopbarVisibility();
+			updateDashButton();
 			updateVictoryPanel();
 			// Confetti triggers
 			triggerEffects(prevState, state);
@@ -240,6 +242,17 @@
 			host.classList.remove('hide-during-round');
 			settingsBtn.classList.remove('hide-during-round');
 		}
+	}
+
+	function updateDashButton() {
+		if (!dashBtn || !state) return;
+		const me = (state.players || []).find(p => p.id === myId);
+		if (!me) { dashBtn.textContent = 'Dash'; dashBtn.disabled = true; return; }
+		const now = Date.now();
+		const readyAt = me.dashReadyAt || 0;
+		const ready = now >= readyAt;
+		dashBtn.disabled = !ready;
+		dashBtn.textContent = ready ? 'Dash' : 'Recharging…';
 	}
 
 	function updateVictoryPanel() {
@@ -713,8 +726,11 @@
 			const x = worldToScreenX(p.x);
 			const y = worldToScreenY(p.y);
 			const r = radiusToScreen(p.r);
-			// filled glowing orb using player color
-			drawGlowingOrb(x, y, r, (p.color || '#22c55e'), 'rgba(34,197,94,0.5)');
+			// choose color based on alive state
+			const fillCol = p.alive ? (p.color || '#22c55e') : '#9ca3af';
+			const glowCol = p.alive ? 'rgba(34,197,94,0.5)' : 'rgba(156,163,175,0.5)';
+			// filled glowing orb using chosen color
+			drawGlowingOrb(x, y, r, fillCol, glowCol);
 			// aura effects
 			if (p.shield) {
 				ctx.beginPath();
@@ -747,7 +763,7 @@
 			ctx.shadowOffsetX = 0;
 			ctx.fillText(p.emoji || '🙂', x, y + 1);
 			ctx.restore();
-			ctx.fillStyle = '#fff';
+			ctx.fillStyle = p.alive ? '#fff' : '#cbd5e1';
 			ctx.font = '12px system-ui, sans-serif';
 			ctx.textAlign = 'center';
 			ctx.fillText((isMe ? 'YOU - ' : '') + p.name, x, y - r - 6);
@@ -756,6 +772,8 @@
 		// Postprocess glow compose
 		renderGlowSources();
 		compositeGlow();
+		// Draw explosion rings on top for visibility
+		drawExplosions();
 
 		// Particles update/draw (approximate dt from frame time)
 		const frameEnd = performance.now();
@@ -823,7 +841,13 @@
 		input.x = x / len; input.y = y / len;
 		if (socket) socket.emit('input', input);
 	}
-	window.addEventListener('keydown', (e) => { keys.add(e.key); recomputeKeyboardInput(); });
+	window.addEventListener('keydown', (e) => {
+		keys.add(e.key);
+		if (e.key === 'Shift' || e.code === 'Space') {
+			if (socket) socket.emit('dash');
+		}
+		recomputeKeyboardInput();
+	});
 	window.addEventListener('keyup', (e) => { keys.delete(e.key); recomputeKeyboardInput(); });
 
 	let joyActive = false;
@@ -867,6 +891,12 @@
 	});
 	joystick.addEventListener('pointerup', () => { joyActive = false; centerStick(); });
 	joystick.addEventListener('pointercancel', () => { joyActive = false; centerStick(); });
+
+	if (dashBtn) {
+		dashBtn.addEventListener('click', () => {
+			if (socket) socket.emit('dash');
+		});
+	}
 
 	restartGameBtn.addEventListener('click', () => {
 		if (!socket) return;

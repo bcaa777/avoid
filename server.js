@@ -38,6 +38,10 @@ const BUMP_BOOST_MULTIPLIER = 5;
 const BUMP_BOOST_DURATION_MS = 10000;
 // Base bump strength for player-vs-player collisions
 const PLAYER_BUMP_BASE_MULTIPLIER = 2;
+// Dash mechanic
+const DASH_DURATION_MS = 300;
+const DASH_COOLDOWN_MS = 2000;
+const DASH_SPEED_MULTIPLIER = 2;
 // Shield: consumes on first hit (no timer)
 
 const ENEMY_SPAWN_SAFE_MS = 1000; // enemies cannot hurt for first 1s
@@ -387,8 +391,12 @@ function tickPhysics(room, dt) {
 		const shrunk = now < (player.shrinkUntil || 0);
 		const baseAccel = room.settings.playerAccel;
 		const baseMax = room.settings.playerMaxSpeed;
-		const accel = hasBoost ? baseAccel * SPEED_BOOST_MULTIPLIER : baseAccel;
-		const maxSpeed = hasBoost ? baseMax * SPEED_BOOST_MULTIPLIER : baseMax;
+		let accel = hasBoost ? baseAccel * SPEED_BOOST_MULTIPLIER : baseAccel;
+		let maxSpeed = hasBoost ? baseMax * SPEED_BOOST_MULTIPLIER : baseMax;
+		if (now < (player.dashUntil || 0)) {
+			accel *= DASH_SPEED_MULTIPLIER;
+			maxSpeed *= DASH_SPEED_MULTIPLIER;
+		}
 		player.vx += input.x * accel * dt;
 		player.vy += input.y * accel * dt;
 		const speed = mag(player.vx, player.vy);
@@ -533,6 +541,8 @@ function buildState(room) {
 			shield: !!p.shield,
 			shrinkUntil: p.shrinkUntil || 0,
 			emoji: p.emoji || DEFAULT_PLAYER_EMOJI,
+			dashUntil: p.dashUntil || 0,
+			dashReadyAt: p.dashReadyAt || 0,
 		})),
 		enemies: room.enemies.map(e => ({ id: e.id, x: e.x, y: e.y, r: e.r, color: e.color, spawnSafeUntil: e.spawnSafeUntil || 0, emoji: e.emoji || '👾' })),
 		powerups: room.powerups.map(pu => ({ id: pu.id, type: pu.type, x: pu.x, y: pu.y, r: pu.r, expiresAt: pu.expiresAt })),
@@ -566,6 +576,8 @@ io.on('connection', (socket) => {
 		shrinkUntil: 0,
 		emoji: DEFAULT_PLAYER_EMOJI,
 		input: { x: 0, y: 0 },
+		dashUntil: 0,
+		dashReadyAt: 0,
 	};
 
 	socket.emit('init', { id: socket.id });
@@ -650,6 +662,15 @@ io.on('connection', (socket) => {
 		if (!vec || typeof vec.x !== 'number' || typeof vec.y !== 'number') return;
 		const n = normalize(vec.x, vec.y);
 		player.input = { x: clamp(n.x, -1, 1), y: clamp(n.y, -1, 1) };
+	});
+
+	socket.on('dash', () => {
+		const now = Date.now();
+		if (player.dashUntil && now < player.dashUntil) return; // already dashing
+		if (player.dashReadyAt && now < player.dashReadyAt) return; // cooldown
+		if (!player.alive) return;
+		player.dashUntil = now + DASH_DURATION_MS;
+		player.dashReadyAt = now + DASH_COOLDOWN_MS;
 	});
 
 	socket.on('disconnect', () => {
