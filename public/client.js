@@ -58,6 +58,7 @@
 	const particles = [];
 	let lastGameOverAt = 0;
 	let lastExplosionIds = new Set();
+	let lastGoUntil = 0;
 	// Postprocess glow buffer
 	const glowCanvas = document.createElement('canvas');
 	const glowCtx = glowCanvas.getContext('2d');
@@ -102,6 +103,10 @@
 			worldWidth = s.world.width;
 			worldHeight = s.world.height;
 			updateScoreboard();
+			// Flash GO when freeze just ended
+			if (prevState && prevState.freezeUntil && Date.now() < prevState.freezeUntil && (!s.freezeUntil || Date.now() >= s.freezeUntil)) {
+				lastGoUntil = Date.now() + 800;
+			}
 			updateAnnouncement();
 			updateHostControls(s.hostId);
 			if (!pendingSettings && !settingsInitialized) {
@@ -163,10 +168,7 @@
 	function updateEnemyCount() {
 		if (!state || !enemyCountEl) return;
 		enemyCountEl.textContent = `Enemies: ${state.enemies.length}`;
-		// Show freeze badge in announcement area
-		if (state.freezeUntil && Date.now() < state.freezeUntil) {
-			announcementEl.textContent = 'Freeze active!';
-		}
+		// Announcement handled in updateAnnouncement()
 	}
 
 	function updateScoreboard() {
@@ -185,7 +187,13 @@
 			announcementEl.textContent = msg;
 		} else if (!state.roundRunning) {
 			announcementEl.textContent = 'Waiting for host to start...';
-		} else if (!(state.freezeUntil && Date.now() < state.freezeUntil)) {
+		} else if (state.freezeUntil && Date.now() < state.freezeUntil) {
+			const remain = Math.ceil((state.freezeUntil - Date.now()) / 1000);
+			const text = remain >= 3 ? '3' : remain === 2 ? '2' : remain === 1 ? '1' : 'GO';
+			announcementEl.textContent = `${text}`;
+		} else if (Date.now() < lastGoUntil) {
+			announcementEl.textContent = 'GO';
+		} else {
 			announcementEl.textContent = '';
 		}
 	}
@@ -343,7 +351,7 @@
 		ctx.font = `${Math.max(10, r)}px sans-serif`;
 		ctx.textAlign = 'center';
 		ctx.textBaseline = 'middle';
-		const icon = pu.type === 'freeze' ? '❄' : pu.type === 'speed' ? '⚡' : pu.type === 'bomb' ? '💣' : pu.type === 'shrink' ? '⇲' : '⛨';
+		const icon = pu.type === 'freeze' ? '❄' : pu.type === 'speed' ? '⚡' : pu.type === 'bomb' ? '💣' : pu.type === 'shrink' ? '⇲' : pu.type === 'bump' ? '💥' : '⛨';
 		ctx.fillText(icon, x, y + 1);
 		ctx.restore();
 	}
@@ -554,7 +562,7 @@
 			const x = worldToScreenX(pu.x);
 			const y = worldToScreenY(pu.y);
 			const r = Math.max(5, radiusToScreen(pu.r));
-			const colMid = pu.type === 'freeze' ? 'rgba(96,165,250,0.6)' : pu.type === 'speed' ? 'rgba(34,197,94,0.6)' : pu.type === 'bomb' ? 'rgba(239,68,68,0.65)' : pu.type === 'shrink' ? 'rgba(167,139,250,0.6)' : 'rgba(245,158,11,0.6)';
+			const colMid = pu.type === 'freeze' ? 'rgba(96,165,250,0.6)' : pu.type === 'speed' ? 'rgba(34,197,94,0.6)' : pu.type === 'bomb' ? 'rgba(239,68,68,0.65)' : pu.type === 'shrink' ? 'rgba(167,139,250,0.6)' : pu.type === 'bump' ? 'rgba(234,179,8,0.7)' : 'rgba(245,158,11,0.6)';
 			const g = glowCtx.createRadialGradient(x, y, Math.max(1, r * 0.4), x, y, r);
 			g.addColorStop(0, 'rgba(0,0,0,0)');
 			g.addColorStop(0.75, colMid);
@@ -679,7 +687,7 @@
 			ctx.textBaseline = 'middle';
 			ctx.shadowColor = 'rgba(255,255,255,0.35)';
 			ctx.shadowBlur = 12;
-			const icon = pu.type === 'freeze' ? '❄️' : pu.type === 'speed' ? '⚡' : pu.type === 'bomb' ? '💣' : pu.type === 'shrink' ? '↘️' : '🛡️';
+			const icon = pu.type === 'freeze' ? '❄️' : pu.type === 'speed' ? '⚡' : pu.type === 'bomb' ? '💣' : pu.type === 'shrink' ? '↘️' : pu.type === 'bump' ? '💥' : '🛡️';
 			ctx.fillText(icon, x, y + 1);
 			ctx.restore();
 		}

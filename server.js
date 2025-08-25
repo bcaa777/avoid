@@ -26,18 +26,23 @@ const DEFAULTS = {
 	friction: 0.9,
 };
 
-const POWERUP_RADIUS = 18;
+const POWERUP_RADIUS = 27; // 1.5x larger
 const POWERUP_LIFETIME_MS = 10000; // disappears if not picked in 10s
 const POWERUP_SPAWN_MIN_MS = 10000;
 const POWERUP_SPAWN_MAX_MS = 20000;
 const FREEZE_DURATION_MS = 3000;
 const SPEED_BOOST_MULTIPLIER = 1.5;
 const SPEED_BOOST_DURATION_MS = 10000;
+// Bump boost powerup (player vs player knockback advantage)
+const BUMP_BOOST_MULTIPLIER = 5;
+const BUMP_BOOST_DURATION_MS = 10000;
+// Base bump strength for player-vs-player collisions
+const PLAYER_BUMP_BASE_MULTIPLIER = 2;
 // Shield: consumes on first hit (no timer)
 
 const ENEMY_SPAWN_SAFE_MS = 1000; // enemies cannot hurt for first 1s
 
-const POINT_RADIUS = 14;
+const POINT_RADIUS = 28; // 2x larger
 const POINT_LIFETIME_MS = 5000;
 const POINT_SPAWN_MIN_MS = 5000;
 const POINT_SPAWN_MAX_MS = 10000;
@@ -54,6 +59,12 @@ function pickPointValue() {
 		if ((r -= it.weight) <= 0) return it.value;
 	}
 	return 1;
+}
+
+function powerupSpawnScaleForPlayers(count) {
+	if (count <= 2) return 1;
+	if (count <= 6) return 0.5;
+	return 1 / 3;
 }
 
 // Rooms
@@ -153,6 +164,37 @@ function resolveCircleCollision(a, b) {
 	}
 }
 
+function resolvePlayerCollision(a, b, baseMultiplier, now) {
+	const dx = b.x - a.x;
+	const dy = b.y - a.y;
+	const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+	const overlap = a.r + b.r - dist;
+	if (overlap > 0) {
+		const nx = dx / dist;
+		const ny = dy / dist;
+		const correction = overlap / 2 + 0.5;
+		a.x -= nx * correction;
+		a.y -= ny * correction;
+		b.x += nx * correction;
+		b.y += ny * correction;
+		const dvx = b.vx - a.vx;
+		const dvy = b.vy - a.vy;
+		const vn = dvx * nx + dvy * ny;
+		if (vn < 0) {
+			const impulse = -vn * (baseMultiplier || 1);
+			const aBoost = now < (a.bumpBoostUntil || 0);
+			const bBoost = now < (b.bumpBoostUntil || 0);
+			let aScale = 1, bScale = 1;
+			if (aBoost && !bBoost) { bScale = BUMP_BOOST_MULTIPLIER; aScale = 1 / BUMP_BOOST_MULTIPLIER; }
+			else if (bBoost && !aBoost) { aScale = BUMP_BOOST_MULTIPLIER; bScale = 1 / BUMP_BOOST_MULTIPLIER; }
+			a.vx -= impulse * nx * aScale;
+			a.vy -= impulse * ny * aScale;
+			b.vx += impulse * nx * bScale;
+			b.vy += impulse * ny * bScale;
+		}
+	}
+}
+
 function bounceOffWalls(body) {
 	if (body.x - body.r < 0) {
 		body.x = body.r;
@@ -192,7 +234,7 @@ function createEnemy(room) {
 
 function spawnPowerup(room) {
 	const now = Date.now();
-	const types = ['freeze', 'speed', 'immortal', 'bomb', 'shrink'];
+	const types = ['freeze', 'speed', 'immortal', 'bomb', 'shrink', 'bump'];
 	const type = types[Math.floor(Math.random() * types.length)];
 	const pos = randomSpawn(POWERUP_RADIUS);
 	room.powerups.push({
@@ -203,7 +245,10 @@ function spawnPowerup(room) {
 		r: POWERUP_RADIUS,
 		expiresAt: now + POWERUP_LIFETIME_MS,
 	});
-	room.nextPowerupAt = now + (POWERUP_SPAWN_MIN_MS + Math.floor(Math.random() * (POWERUP_SPAWN_MAX_MS - POWERUP_SPAWN_MIN_MS + 1)));
+	const scale = (room.players.size <= 2) ? 1 : (room.players.size <= 6 ? 0.5 : (1/3));
+	const min = Math.round(POWERUP_SPAWN_MIN_MS * scale);
+	const max = Math.round(POWERUP_SPAWN_MAX_MS * scale);
+	room.nextPowerupAt = now + (min + Math.floor(Math.random() * (max - min + 1)));
 }
 
 function spawnPoint(room) {
@@ -231,6 +276,7 @@ function resetPlayersForRound(room) {
 		player.alive = true;
 		player.speedBoostUntil = 0;
 		player.shield = false;
+		player.bumpBoostUntil = 0;
 	}
 }
 
@@ -245,10 +291,15 @@ function startRound(room) {
 	room.enemies.push(createEnemy(room));
 	room.roundRunning = true;
 	room.winnerAnnouncementUntil = 0;
-	room.freezeUntil = 0;
+	room.freezeUntil = Date.now() + FREEZE_DURATION_MS;
 	room.roundStartedPlayerCount = room.players.size;
 	const now = Date.now();
-	room.nextPowerupAt = now + (POWERUP_SPAWN_MIN_MS + Math.floor(Math.random() * (POWERUP_SPAWN_MAX_MS - POWERUP_SPAWN_MIN_MS + 1)));
+	{
+		const scale = powerupSpawnScaleForPlayers(room.players.size);
+		const min = Math.round(POWERUP_SPAWN_MIN_MS * scale);
+		const max = Math.round(POWERUP_SPAWN_MAX_MS * scale);
+		room.nextPowerupAt = now + (min + Math.floor(Math.random() * (max - min + 1)));
+	}
 	room.nextPointAt = now + (POINT_SPAWN_MIN_MS + Math.floor(Math.random() * (POINT_SPAWN_MAX_MS - POINT_SPAWN_MIN_MS + 1)));
 	if (room.enemyAdder) clearInterval(room.enemyAdder);
 	room.enemyAdder = setInterval(() => {
@@ -304,8 +355,11 @@ function applyPowerup(room, player, powerup) {
 		case 'immortal':
 			player.shield = true; // consume on first hit
 			break;
+		case 'bump':
+			player.bumpBoostUntil = Date.now() + BUMP_BOOST_DURATION_MS;
+			break;
 		case 'bomb': {
-			const blastR = (room.settings.enemyRadius || 20) * 5;
+			const blastR = (room.settings.enemyRadius || 20) * 20;
 			const cx = powerup.x;
 			const cy = powerup.y;
 			room.enemies = room.enemies.filter(e => {
@@ -367,7 +421,7 @@ function tickPhysics(room, dt) {
 	const alivePlayers = Array.from(room.players.values()).filter(p => p.alive);
 	for (let i = 0; i < alivePlayers.length; i++) {
 		for (let j = i + 1; j < alivePlayers.length; j++) {
-			resolveCircleCollision(alivePlayers[i], alivePlayers[j]);
+			resolvePlayerCollision(alivePlayers[i], alivePlayers[j], PLAYER_BUMP_BASE_MULTIPLIER, now);
 		}
 	}
 	if (!freeze) {
