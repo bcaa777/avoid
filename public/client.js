@@ -47,6 +47,7 @@
 	let socket = null;
 	let myId = null;
 	let state = null;
+	let serverClockSkewMs = 0;
 	let input = { x: 0, y: 0 };
 	let worldWidth = 900;
 	let worldHeight = 1200;
@@ -82,6 +83,9 @@
 		socket = io();
 		socket.on('init', (data) => {
 			myId = data.id;
+			if (data && typeof data.serverTime === 'number') {
+				serverClockSkewMs = (data.serverTime - Date.now());
+			}
 			if (nameInput.value.trim()) socket.emit('setName', nameInput.value.trim());
 			if (emojiInput && emojiInput.value.trim()) socket.emit('setEmoji', emojiInput.value.trim());
 			else sendEmoji();
@@ -248,7 +252,7 @@
 		if (!dashBtn || !state) return;
 		const me = (state.players || []).find(p => p.id === myId);
 		if (!me) { dashBtn.textContent = 'Dash'; dashBtn.disabled = true; return; }
-		const now = Date.now();
+		const now = (state.now || Date.now()) - serverClockSkewMs;
 		const readyAt = me.dashReadyAt || 0;
 		const ready = now >= readyAt;
 		dashBtn.disabled = !ready;
@@ -364,7 +368,7 @@
 		ctx.font = `${Math.max(10, r)}px sans-serif`;
 		ctx.textAlign = 'center';
 		ctx.textBaseline = 'middle';
-		const icon = pu.type === 'freeze' ? '❄' : pu.type === 'speed' ? '⚡' : pu.type === 'bomb' ? '💣' : pu.type === 'shrink' ? '⇲' : pu.type === 'bump' ? '💥' : '⛨';
+		const icon = pu.type === 'freeze' ? '❄' : pu.type === 'speed' ? '⚡' : pu.type === 'bomb' ? '💣' : pu.type === 'shrink' ? '⇲' : '⛨';
 		ctx.fillText(icon, x, y + 1);
 		ctx.restore();
 	}
@@ -575,7 +579,7 @@
 			const x = worldToScreenX(pu.x);
 			const y = worldToScreenY(pu.y);
 			const r = Math.max(5, radiusToScreen(pu.r));
-			const colMid = pu.type === 'freeze' ? 'rgba(96,165,250,0.6)' : pu.type === 'speed' ? 'rgba(34,197,94,0.6)' : pu.type === 'bomb' ? 'rgba(239,68,68,0.65)' : pu.type === 'shrink' ? 'rgba(167,139,250,0.6)' : pu.type === 'bump' ? 'rgba(234,179,8,0.7)' : 'rgba(245,158,11,0.6)';
+			const colMid = pu.type === 'freeze' ? 'rgba(96,165,250,0.6)' : pu.type === 'speed' ? 'rgba(34,197,94,0.6)' : pu.type === 'bomb' ? 'rgba(239,68,68,0.65)' : pu.type === 'shrink' ? 'rgba(167,139,250,0.6)' : 'rgba(245,158,11,0.6)';
 			const g = glowCtx.createRadialGradient(x, y, Math.max(1, r * 0.4), x, y, r);
 			g.addColorStop(0, 'rgba(0,0,0,0)');
 			g.addColorStop(0.75, colMid);
@@ -700,7 +704,7 @@
 			ctx.textBaseline = 'middle';
 			ctx.shadowColor = 'rgba(255,255,255,0.35)';
 			ctx.shadowBlur = 12;
-			const icon = pu.type === 'freeze' ? '❄️' : pu.type === 'speed' ? '⚡' : pu.type === 'bomb' ? '💣' : pu.type === 'shrink' ? '↘️' : pu.type === 'bump' ? '💥' : '🛡️';
+			const icon = pu.type === 'freeze' ? '❄️' : pu.type === 'speed' ? '⚡' : pu.type === 'bomb' ? '💣' : pu.type === 'shrink' ? '↘️' : '🛡️';
 			ctx.fillText(icon, x, y + 1);
 			ctx.restore();
 		}
@@ -738,16 +742,6 @@
 				ctx.strokeStyle = '#f59e0b';
 				ctx.lineWidth = 3;
 				ctx.stroke();
-			}
-			// bump boost aura
-			if (p.bumpBoostUntil && now < p.bumpBoostUntil) {
-				ctx.beginPath();
-				ctx.arc(x, y, r + 12, 0, Math.PI * 2);
-				ctx.strokeStyle = '#eab308';
-				ctx.lineWidth = 3;
-				ctx.setLineDash([4, 3]);
-				ctx.stroke();
-				ctx.setLineDash([]);
 			}
 			if (p.speedBoostUntil && now < p.speedBoostUntil) {
 				ctx.beginPath();

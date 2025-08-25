@@ -33,9 +33,6 @@ const POWERUP_SPAWN_MAX_MS = 20000;
 const FREEZE_DURATION_MS = 3000;
 const SPEED_BOOST_MULTIPLIER = 1.5;
 const SPEED_BOOST_DURATION_MS = 10000;
-// Bump boost powerup (player vs player knockback advantage)
-const BUMP_BOOST_MULTIPLIER = 5;
-const BUMP_BOOST_DURATION_MS = 5000;
 // Base bump strength for player-vs-player collisions
 const PLAYER_BUMP_BASE_MULTIPLIER = 2;
 // Dash mechanic
@@ -186,11 +183,12 @@ function resolvePlayerCollision(a, b, baseMultiplier, now) {
 		const vn = dvx * nx + dvy * ny;
 		if (vn < 0) {
 			const impulse = -vn * (baseMultiplier || 1);
-			const aBoost = now < (a.bumpBoostUntil || 0);
-			const bBoost = now < (b.bumpBoostUntil || 0);
+			// While dashing, impart 2x bounce to the other player
+			const aDashing = now < (a.dashUntil || 0);
+			const bDashing = now < (b.dashUntil || 0);
 			let aScale = 1, bScale = 1;
-			if (aBoost && !bBoost) { bScale = BUMP_BOOST_MULTIPLIER; aScale = 1 / BUMP_BOOST_MULTIPLIER; }
-			else if (bBoost && !aBoost) { aScale = BUMP_BOOST_MULTIPLIER; bScale = 1 / BUMP_BOOST_MULTIPLIER; }
+			if (aDashing && !bDashing) bScale *= 2;
+			if (bDashing && !aDashing) aScale *= 2;
 			a.vx -= impulse * nx * aScale;
 			a.vy -= impulse * ny * aScale;
 			b.vx += impulse * nx * bScale;
@@ -238,7 +236,7 @@ function createEnemy(room) {
 
 function spawnPowerup(room) {
 	const now = Date.now();
-	const types = ['freeze', 'speed', 'immortal', 'bomb', 'shrink', 'bump'];
+	const types = ['freeze', 'speed', 'immortal', 'bomb', 'shrink'];
 	const type = types[Math.floor(Math.random() * types.length)];
 	const pos = randomSpawn(POWERUP_RADIUS);
 	room.powerups.push({
@@ -280,7 +278,9 @@ function resetPlayersForRound(room) {
 		player.alive = true;
 		player.speedBoostUntil = 0;
 		player.shield = false;
-		player.bumpBoostUntil = 0;
+		player.invincibleUntil = 0;
+		player.dashUntil = 0;
+		player.dashReadyAt = 0;
 	}
 }
 
@@ -359,11 +359,8 @@ function applyPowerup(room, player, powerup) {
 		case 'immortal':
 			player.shield = true; // consume on first hit
 			break;
-		case 'bump':
-			player.bumpBoostUntil = Date.now() + BUMP_BOOST_DURATION_MS;
-			break;
 		case 'bomb': {
-			const blastR = (room.settings.enemyRadius || 20) * 20;
+			const blastR = (room.settings.enemyRadius || 20) * 10; // halved radius
 			const cx = powerup.x;
 			const cy = powerup.y;
 			room.enemies = room.enemies.filter(e => {
@@ -518,6 +515,7 @@ function tickPhysics(room, dt) {
 
 function buildState(room) {
 	return {
+		now: Date.now(),
 		roomId: room.id,
 		hostId: room.hostId,
 		world: { width: WORLD.width, height: WORLD.height },
@@ -580,7 +578,7 @@ io.on('connection', (socket) => {
 		dashReadyAt: 0,
 	};
 
-	socket.emit('init', { id: socket.id });
+	socket.emit('init', { id: socket.id, serverTime: Date.now() });
 
 	socket.on('setName', (newName) => {
 		if (typeof newName === 'string' && newName.trim().length > 0) {
@@ -671,8 +669,9 @@ io.on('connection', (socket) => {
 		if (!player.alive) return;
 		player.dashUntil = now + DASH_DURATION_MS;
 		player.dashReadyAt = now + DASH_COOLDOWN_MS;
-		// Instant impulse in facing/move direction
-		const dir = normalize(player.vx || player.input.x, player.vy || player.input.y);
+		// Instant impulse in facing/move direction; prefer input direction if present
+		const hasInput = Math.abs(player.input.x) + Math.abs(player.input.y) > 0.01;
+		const dir = hasInput ? normalize(player.input.x, player.input.y) : normalize(player.vx, player.vy || 1);
 		const speed = Math.max(1, mag(player.vx, player.vy));
 		const impulse = Math.max(220, speed * 0.8);
 		player.vx += dir.x * impulse;
