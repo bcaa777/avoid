@@ -3,6 +3,8 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const { randomUUID } = require('crypto');
+const cookieParser = require('cookie-parser');
+const bcrypt = require('bcryptjs');
 
 // Server setup
 const app = express();
@@ -12,6 +14,24 @@ const io = new Server(server, {
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
+const SESSION_SECRET = process.env.SESSION_SECRET || randomUUID();
+app.use(cookieParser(SESSION_SECRET));
+
+// Admin auth setup (bcrypt-protected password)
+let ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_BCRYPT || '';
+if (!ADMIN_PASSWORD_HASH) {
+	const plain = process.env.ADMIN_PASSWORD;
+	if (plain && typeof plain === 'string') {
+		ADMIN_PASSWORD_HASH = bcrypt.hashSync(plain, 10);
+	} else {
+		const generated = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+		ADMIN_PASSWORD_HASH = bcrypt.hashSync(generated, 10);
+		console.log('[admin] Generated admin password (set ADMIN_PASSWORD or ADMIN_PASSWORD_BCRYPT to override):', generated);
+	}
+}
+function isAdmin(req) { return req.signedCookies && req.signedCookies.admin === '1'; }
+function requireAdmin(req, res, next) { if (!isAdmin(req)) return res.status(401).send('Unauthorized'); next(); }
 
 // Public rooms listing for lobby
 app.get('/api/rooms', (_req, res) => {
@@ -29,8 +49,8 @@ app.get('/api/rooms', (_req, res) => {
 
 // Game constants (mobile-first portrait)
 const WORLD = { width: 900, height: 1100 };
-const TICK_RATE = 60;
-const BROADCAST_RATE = 30;
+let TICK_RATE = 60;
+let BROADCAST_RATE = 30;
 const DEFAULTS = {
 	playerRadius: 20,
 	enemyRadius: 20,
@@ -41,6 +61,11 @@ const DEFAULTS = {
 	enemySpawnIntervalMs: 10000,
 	friction: 0.9,
  	pointsToWin: 100,
+};
+// Network config (admin-tunable)
+const NET_CONFIG = {
+	inputSendRateHz: 30,   // client throttle recommendation
+	maxInputRateHz: 90,    // server will ignore faster than this
 };
 
 const POWERUP_RADIUS = 27; // 1.5x larger
@@ -617,9 +642,11 @@ io.on('connection', (socket) => {
 		input: { x: 0, y: 0 },
 		dashUntil: 0,
 		dashReadyAt: 0,
+		_lastInputAt: 0,
 	};
 
 	socket.emit('init', { id: socket.id, serverTime: Date.now() });
+	socket.emit('serverConfig', { tickRateHz: TICK_RATE, broadcastRateHz: BROADCAST_RATE, inputSendRateHz: NET_CONFIG.inputSendRateHz, maxInputRateHz: NET_CONFIG.maxInputRateHz });
 
 	socket.on('setName', (newName) => {
 		if (typeof newName === 'string' && newName.trim().length > 0) {
@@ -708,6 +735,10 @@ io.on('connection', (socket) => {
 
 	socket.on('input', (vec) => {
 		if (!vec || typeof vec.x !== 'number' || typeof vec.y !== 'number') return;
+		const now = Date.now();
+		const minInterval = Math.max(1, Math.floor(1000 / (NET_CONFIG.maxInputRateHz || 1000)));
+		if (now - (player._lastInputAt || 0) < minInterval) return;
+		player._lastInputAt = now;
 		const n = normalize(vec.x, vec.y);
 		player.input = { x: clamp(n.x, -1, 1), y: clamp(n.y, -1, 1) };
 	});
@@ -776,19 +807,123 @@ io.on('connection', (socket) => {
 	});
 });
 
-// Game loops
-setInterval(() => {
-	const dt = 1 / TICK_RATE;
-	for (const room of rooms.values()) {
-		if (room.roundRunning) tickPhysics(room, dt);
+// Admin routes
+app.get('/admin', (req, res) => {
+	if (!isAdmin(req)) {
+		res.setHeader('Content-Type', 'text/html; charset=utf-8');
+		res.end(`<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Admin Login</title><style>body{font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif;background:#0b132b;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}form{background:#111827;padding:24px;border-radius:12px;min-width:320px;box-shadow:0 10px 30px rgba(0,0,0,0.4)}h1{margin:0 0 12px;font-size:20px}input,button{width:100%;padding:10px 12px;border-radius:8px;border:none;margin-top:10px}input{background:#0f172a;color:#fff}button{background:#2563eb;color:#fff;font-weight:600;cursor:pointer}#err{color:#f87171;margin-top:10px;height:18px}</style></head><body><form id="f"><h1>Admin Login</h1><input type="password" id="pw" placeholder="Password" autofocus/><div id="err"></div><button type="submit">Sign in</button></form><script>document.getElementById('f').addEventListener('submit', async (e)=>{e.preventDefault();const pw=document.getElementById('pw').value;const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});if(r.ok){location.href='/admin';}else{document.getElementById('err').textContent='Invalid password';}});</script></body></html>`);
+		return;
 	}
-}, Math.floor(1000 / TICK_RATE));
+	res.setHeader('Content-Type', 'text/html; charset=utf-8');
+	res.end(`<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Admin</title><style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b132b;color:#e5e7eb;margin:0}header{position:sticky;top:0;background:#0f172a;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center}main{padding:16px;max-width:900px;margin:0 auto}h2{color:#fff;margin:20px 0 8px}section{background:#111827;padding:16px;border-radius:12px;margin-bottom:16px;border:1px solid rgba(255,255,255,0.06)}label{display:block;margin:10px 0 6px}input{background:#0f172a;border:none;color:#fff;padding:8px 10px;border-radius:8px;width:180px}button{background:#2563eb;color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer;margin-top:10px}small{color:#9ca3af}</style></head><body><header><div>⚙️ Admin</div><button id="logout">Log out</button></header><main><section><h2>Network</h2><div><label>Tick rate (Hz) <input id="tickRate" type="number" min="5" max="240" step="1"></label></div><div><label>Broadcast rate (Hz) <input id="broadcastRate" type="number" min="1" max="240" step="1"></label></div><div><label>Client input send rate (Hz) <input id="inputSendRate" type="number" min="5" max="240" step="1"></label></div><div><label>Server max input accept rate (Hz) <input id="maxInputRate" type="number" min="5" max="500" step="1"></label></div><button id="saveNetwork">Save network</button></section><section><h2>Game defaults</h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px 16px"><label>Player radius <input id="playerRadius" type="number" min="8" max="80" step="1"></label><label>Enemy radius <input id="enemyRadius" type="number" min="8" max="80" step="1"></label><label>Player max speed <input id="playerMaxSpeed" type="number" min="80" max="1000" step="1"></label><label>Enemy min speed <input id="enemySpeedMin" type="number" min="40" max="1600" step="1"></label><label>Enemy max speed <input id="enemySpeedMax" type="number" min="40" max="1600" step="1"></label><label>Enemy spawn interval (ms) <input id="enemySpawnIntervalMs" type="number" min="200" max="60000" step="50"></label><label>Friction (0-1) <input id="friction" type="number" min="0.5" max="0.99" step="0.01"></label><label>Points to win <input id="pointsToWin" type="number" min="10" max="10000" step="1"></label></div><div><label><input id="applyToRooms" type="checkbox" checked> Apply to idle rooms now</label></div><button id="saveDefaults">Save defaults</button><div><small>Defaults apply to new rooms. Optionally updates rooms not in a running round.</small></div></section></main><script src="/admin/app.js"></script></body></html>`);
+});
 
-setInterval(() => {
-	for (const room of rooms.values()) {
-		io.to(room.id).volatile.emit('state', buildState(room));
+app.get('/admin/app.js', requireAdmin, (_req, res) => {
+	res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+	res.end(`(function(){async function fetchCfg(){const r=await fetch('/api/admin/config');return r.json()}function setVal(id,v){const el=document.getElementById(id);if(el) el.value=v}function num(id){const v=Number(document.getElementById(id).value);return Number.isFinite(v)?v:undefined}async function load(){const cfg=await fetchCfg();setVal('tickRate',cfg.network.tickRateHz);setVal('broadcastRate',cfg.network.broadcastRateHz);setVal('inputSendRate',cfg.network.inputSendRateHz);setVal('maxInputRate',cfg.network.maxInputRateHz);const d=cfg.defaults;['playerRadius','enemyRadius','playerMaxSpeed','enemySpeedMin','enemySpeedMax','enemySpawnIntervalMs','pointsToWin'].forEach(k=>setVal(k,d[k]));setVal('friction',d.friction)}document.getElementById('logout').onclick=async()=>{await fetch('/admin/logout',{method:'POST'});location.href='/admin'};document.getElementById('saveNetwork').onclick=async()=>{const payload={network:{tickRateHz:num('tickRate'),broadcastRateHz:num('broadcastRate'),inputSendRateHz:num('inputSendRate'),maxInputRateHz:num('maxInputRate')}};await fetch('/api/admin/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});alert('Network updated')};document.getElementById('saveDefaults').onclick=async()=>{const payload={defaults:{playerRadius:num('playerRadius'),enemyRadius:num('enemyRadius'),playerMaxSpeed:num('playerMaxSpeed'),enemySpeedMin:num('enemySpeedMin'),enemySpeedMax:num('enemySpeedMax'),enemySpawnIntervalMs:num('enemySpawnIntervalMs'),friction:Number(document.getElementById('friction').value),pointsToWin:num('pointsToWin')},applyToRooms:document.getElementById('applyToRooms').checked};await fetch('/api/admin/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});alert('Defaults updated')};load();})();`);
+});
+
+app.post('/admin/login', (req, res) => {
+	const pw = (req.body && req.body.password) || '';
+	if (typeof pw !== 'string') return res.status(400).json({ ok: false });
+	const ok = bcrypt.compareSync(pw, ADMIN_PASSWORD_HASH);
+	if (!ok) return res.status(401).json({ ok: false });
+	res.cookie('admin', '1', {
+		signed: true,
+		httpOnly: true,
+		sameSite: 'lax',
+		secure: process.env.NODE_ENV === 'production',
+		maxAge: 7 * 24 * 60 * 60 * 1000,
+	});
+	res.json({ ok: true });
+});
+
+app.post('/admin/logout', (req, res) => {
+	res.clearCookie('admin');
+	res.json({ ok: true });
+});
+
+app.get('/api/admin/config', requireAdmin, (_req, res) => {
+	res.json({
+		defaults: DEFAULTS,
+		network: { tickRateHz: TICK_RATE, broadcastRateHz: BROADCAST_RATE, inputSendRateHz: NET_CONFIG.inputSendRateHz, maxInputRateHz: NET_CONFIG.maxInputRateHz },
+	});
+});
+
+app.post('/api/admin/config', requireAdmin, (req, res) => {
+	const p = req.body || {};
+	if (p.defaults && typeof p.defaults === 'object') {
+		const d = p.defaults;
+		function applyFinite(key, value, min, max, round = true) {
+			if (typeof value !== 'number' || !Number.isFinite(value)) return;
+			const v = round ? Math.round(value) : value;
+			DEFAULTS[key] = Math.max(min, Math.min(max, v));
+		}
+		applyFinite('playerRadius', d.playerRadius, 8, 80, true);
+		applyFinite('enemyRadius', d.enemyRadius, 8, 80, true);
+		applyFinite('playerMaxSpeed', d.playerMaxSpeed, 80, 1000, true);
+		applyFinite('enemySpeedMin', d.enemySpeedMin, 40, 1600, true);
+		applyFinite('enemySpeedMax', d.enemySpeedMax, 40, 1600, true);
+		applyFinite('enemySpawnIntervalMs', d.enemySpawnIntervalMs, 200, 60000, true);
+		if (typeof d.friction === 'number' && Number.isFinite(d.friction)) DEFAULTS.friction = Math.max(0.5, Math.min(0.99, d.friction));
+		applyFinite('pointsToWin', d.pointsToWin, 10, 10000, true);
+		if (DEFAULTS.enemySpeedMax < DEFAULTS.enemySpeedMin) DEFAULTS.enemySpeedMax = DEFAULTS.enemySpeedMin;
 	}
-}, Math.floor(1000 / BROADCAST_RATE));
+	if (p.applyToRooms) {
+		for (const room of rooms.values()) {
+			if (!room.roundRunning) {
+				const s = room.settings;
+				Object.assign(s, {
+					playerRadius: DEFAULTS.playerRadius,
+					enemyRadius: DEFAULTS.enemyRadius,
+					playerMaxSpeed: DEFAULTS.playerMaxSpeed,
+					enemySpeedMin: DEFAULTS.enemySpeedMin,
+					enemySpeedMax: DEFAULTS.enemySpeedMax,
+					enemySpawnIntervalMs: DEFAULTS.enemySpawnIntervalMs,
+					friction: DEFAULTS.friction,
+					pointsToWin: DEFAULTS.pointsToWin,
+				});
+				s.playerAccel = Math.max(400, Math.min(4000, Math.round(s.playerMaxSpeed * 3.5)));
+				io.to(room.id).emit('settingsUpdated', { settings: room.settings });
+			}
+		}
+	}
+	if (p.network && typeof p.network === 'object') {
+		const n = p.network;
+		function applyHz(v, min, max) { return (typeof v === 'number' && Number.isFinite(v)) ? Math.max(min, Math.min(max, Math.round(v))) : undefined; }
+		const tr = applyHz(n.tickRateHz, 5, 240);
+		const br = applyHz(n.broadcastRateHz, 1, 240);
+		const inHz = applyHz(n.inputSendRateHz, 5, 240);
+		const maxInHz = applyHz(n.maxInputRateHz, 5, 500);
+		if (typeof tr === 'number') TICK_RATE = tr;
+		if (typeof br === 'number') BROADCAST_RATE = br;
+		if (typeof inHz === 'number') NET_CONFIG.inputSendRateHz = inHz;
+		if (typeof maxInHz === 'number') NET_CONFIG.maxInputRateHz = maxInHz;
+		restartLoops();
+		io.emit('serverConfig', { tickRateHz: TICK_RATE, broadcastRateHz: BROADCAST_RATE, inputSendRateHz: NET_CONFIG.inputSendRateHz, maxInputRateHz: NET_CONFIG.maxInputRateHz });
+	}
+	res.json({ ok: true });
+});
+
+// Game loops (dynamic)
+let tickInterval = null;
+let broadcastInterval = null;
+function restartLoops() {
+	if (tickInterval) clearInterval(tickInterval);
+	if (broadcastInterval) clearInterval(broadcastInterval);
+	tickInterval = setInterval(() => {
+		const dt = 1 / TICK_RATE;
+		for (const room of rooms.values()) {
+			if (room.roundRunning) tickPhysics(room, dt);
+		}
+	}, Math.floor(1000 / TICK_RATE));
+	broadcastInterval = setInterval(() => {
+		for (const room of rooms.values()) {
+			io.to(room.id).volatile.emit('state', buildState(room));
+		}
+	}, Math.floor(1000 / BROADCAST_RATE));
+}
+restartLoops();
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {

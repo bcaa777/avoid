@@ -68,6 +68,8 @@
 	// Postprocess glow buffer
 	const glowCanvas = document.createElement('canvas');
 	const glowCtx = glowCanvas.getContext('2d');
+	// Network tuning from server
+	let inputSendRateHz = 30;
 
 	function resizeCanvas() {
 		const dpr = window.devicePixelRatio || 1;
@@ -187,6 +189,12 @@
 				if (setPointsToWin) setPointsToWin.value = settings.pointsToWin;
 			}
 			settingsInitialized = true;
+		});
+		socket.on('serverConfig', (cfg) => {
+			if (!cfg || typeof cfg !== 'object') return;
+			if (typeof cfg.inputSendRateHz === 'number' && Number.isFinite(cfg.inputSendRateHz)) {
+				inputSendRateHz = Math.max(1, Math.floor(cfg.inputSendRateHz));
+			}
 		});
 	}
 
@@ -933,10 +941,10 @@
 
 	const keys = new Set();
 	let lastInputSentAt = 0;
-	const INPUT_INTERVAL_MS = Math.floor(1000 / 30);
 	function sendThrottledInput() {
 		const now = Date.now();
-		if (now - lastInputSentAt < INPUT_INTERVAL_MS) return;
+		const minInterval = Math.max(1, Math.floor(1000 / Math.max(1, inputSendRateHz)));
+		if (now - lastInputSentAt < minInterval) return;
 		lastInputSentAt = now;
 		if (socket) socket.emit('input', input);
 	}
