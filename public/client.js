@@ -5,6 +5,9 @@
 	const nameInput = document.getElementById('nameInput');
 	const emojiInput = document.getElementById('emojiInput');
 	const createBtn = document.getElementById('createBtn');
+	const publicToggle = document.getElementById('publicToggle');
+	const refreshRoomsBtn = document.getElementById('refreshRooms');
+	const roomsList = document.getElementById('roomsList');
 	const joinBtn = document.getElementById('joinBtn');
 	const roomInput = document.getElementById('roomInput');
 	const scoreboardEl = document.getElementById('scoreboard');
@@ -796,7 +799,8 @@
 
 	createBtn.addEventListener('click', () => {
 		ensureName();
-		socket.emit('createRoom');
+		const isPublic = !!(publicToggle && publicToggle.checked);
+		socket.emit('createRoom', { isPublic });
 	});
 	joinBtn.addEventListener('click', () => {
 		ensureName();
@@ -804,6 +808,52 @@
 		if (!code) return alert('Enter room code');
 		socket.emit('joinRoom', { roomId: code });
 	});
+
+	async function fetchRooms() {
+		try {
+			const res = await fetch('/api/rooms');
+			const data = await res.json();
+			renderRooms(data.rooms || []);
+		} catch {}
+	}
+
+	function renderRooms(rooms) {
+		if (!roomsList) return;
+		if (!rooms || rooms.length === 0) {
+			roomsList.innerHTML = '<div class="hint">No public rooms yet</div>';
+			return;
+		}
+		roomsList.innerHTML = rooms.map(r => {
+			const players = (r.players || []).map(p => `${p.name} (${p.score})`).join(', ');
+			const status = r.gameOver ? 'Game over' : (r.roundRunning ? 'In round' : 'Lobby');
+			return `<div class="room"><div><div><b>${r.id}</b> · <span class="meta">${status} · ${r.playerCount} players</span></div><div class="meta">${players}</div></div><div><button data-room="${r.id}" class="joinRoomBtn">Join</button></div></div>`;
+		}).join('');
+		roomsList.querySelectorAll('.joinRoomBtn').forEach(btn => {
+			btn.addEventListener('click', () => {
+				const rid = btn.getAttribute('data-room');
+				if (!rid) return;
+				ensureName();
+				socket.emit('joinRoom', { roomId: rid });
+			});
+		});
+	}
+
+	if (refreshRoomsBtn) {
+		refreshRoomsBtn.addEventListener('click', fetchRooms);
+	}
+	// Auto-refresh lobby while menu is visible
+	let lobbyTimer = null;
+	function startLobbyPolling() {
+		if (lobbyTimer) return;
+		fetchRooms();
+		lobbyTimer = setInterval(fetchRooms, 4000);
+	}
+	function stopLobbyPolling() {
+		if (lobbyTimer) { clearInterval(lobbyTimer); lobbyTimer = null; }
+	}
+
+	// Start lobby polling immediately on load
+	startLobbyPolling();
 	startBtn.addEventListener('click', () => {
 		socket.emit('hostStart');
 	});

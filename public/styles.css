@@ -30,6 +30,7 @@ body {
 #menu button:hover { filter: brightness(1.05); }
 #menu .row { display: flex; gap: 8px; margin-bottom: 10px; }
 #menu .row.join input { flex: 1; }
+#menu .row .inline { display: inline-flex; align-items: center; gap: 6px; color: #e2e8f0; }
 #menu .hint { margin-top: 8px; font-size: 12px; opacity: 0.9; color: #cbd5e1; }
 
 #game { width: 100vw; height: 100vh; display: block; margin: 0; }
@@ -82,3 +83,9 @@ body {
 
 #victoryPanel { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(420px, 92vw); }
 #victoryPanel #victoryList { display: grid; gap: 6px; margin: 8px 0; }
+
+/* Lobby rooms list */
+.rooms { display: grid; gap: 8px; max-height: 220px; overflow: auto; }
+.room { display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.06); border: 1px solid var(--glass-strong); border-radius: 10px; padding: 8px 10px; }
+.room .meta { font-size: 12px; opacity: 0.9; }
+.room button { padding: 6px 10px; border-radius: 8px; border: 1px solid transparent; background: linear-gradient(135deg, var(--accent), #06b6d4); color: #00222a; font-weight: 800; }

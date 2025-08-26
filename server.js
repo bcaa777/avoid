@@ -11,6 +11,20 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Public rooms listing for lobby
+app.get('/api/rooms', (_req, res) => {
+	const list = Array.from(rooms.values())
+		.filter(r => r.isPublic)
+		.map(r => ({
+			id: r.id,
+			roundRunning: !!r.roundRunning,
+			gameOver: !!r.gameOver,
+			playerCount: r.players.size,
+			players: Array.from(r.players.values()).map(p => ({ name: p.name, score: p.score }))
+		}));
+	res.json({ rooms: list });
+});
+
 // Game constants (mobile-first portrait)
 const WORLD = { width: 900, height: 1100 };
 const TICK_RATE = 60;
@@ -75,6 +89,7 @@ function createRoom(roomId) {
 	const room = {
 		id: roomId,
 		hostId: null,
+		isPublic: false,
 		players: new Map(), // socketId -> player
 		enemies: [],
 		powerups: [],
@@ -598,11 +613,12 @@ io.on('connection', (socket) => {
 		if (currentRoomId) io.to(currentRoomId).emit('state', buildState(getRoom(currentRoomId)));
 	});
 
-	socket.on('createRoom', () => {
+	socket.on('createRoom', (payload) => {
 		let roomId;
 		do { roomId = generateRoomId(); } while (rooms.has(roomId));
 		const room = createRoom(roomId);
 		room.hostId = socket.id;
+		room.isPublic = !!(payload && payload.isPublic);
 		room.players.set(socket.id, player);
 		socket.join(roomId);
 		currentRoomId = roomId;
