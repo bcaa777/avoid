@@ -133,7 +133,6 @@
 			settingsInitialized = false; // new room → re-init when state arrives
 			updateHostControls(hostId);
 			document.getElementById('hud').classList.remove('hidden');
-			const chatEl = document.getElementById('chat'); if (chatEl) chatEl.style.display = 'flex';
 			sendEmoji();
 			socket.emit('chatRequest');
 			appendChat({ name: 'System', color: '#9ca3af', text: 'You joined the room. Say hi!' });
@@ -262,8 +261,10 @@
 
 	function updateHostControls(hostId) {
 		const isHost = hostId === myId;
-		hostControls.classList.toggle('hidden', !isHost);
-		if (!isHost) settingsPanel.classList.add('hidden');
+		if (hostControls) {
+			hostControls.classList.toggle('hidden', !isHost);
+			if (!isHost) settingsPanel.classList.add('hidden');
+		}
 	}
 
 	function attachEditListeners() {
@@ -314,10 +315,10 @@
 			announcementEl.textContent = 'Waiting for host to start...';
 		} else if (state.freezeUntil && Date.now() < state.freezeUntil) {
 			const remain = Math.ceil((state.freezeUntil - Date.now()) / 1000);
-			const text = remain >= 3 ? '3' : remain === 2 ? '2' : remain === 1 ? '1' : 'GO';
+			const text = remain >= 3 ? '3' : remain === 2 ? '2' : remain === 1 ? '1' : 'START';
 			announcementEl.textContent = `${text}`;
 		} else if (Date.now() < lastGoUntil) {
-			announcementEl.textContent = 'GO';
+			announcementEl.textContent = 'START';
 		} else {
 			announcementEl.textContent = '';
 		}
@@ -1121,4 +1122,15 @@
 		if (!socket) return;
 		socket.emit('hostRestartGame');
 	});
+
+	// Chat show/hide controls
+	const chatEl = document.getElementById('chat');
+	const chatShowBtn = document.getElementById('chatShow');
+	const chatHideBtn = document.getElementById('chatHide');
+	function showChat() { if (chatEl) chatEl.classList.remove('hidden'); if (chatShowBtn) chatShowBtn.classList.add('hidden'); }
+	function hideChat() { if (chatEl) chatEl.classList.add('hidden'); if (chatShowBtn) chatShowBtn.classList.remove('hidden'); }
+	if (chatShowBtn) chatShowBtn.addEventListener('click', () => showChat());
+	if (chatHideBtn) chatHideBtn.addEventListener('click', () => hideChat());
+	// ensure initial toggle state is consistent
+	if (chatEl && chatEl.classList.contains('hidden')) { if (chatShowBtn) chatShowBtn.classList.remove('hidden'); }
 })();

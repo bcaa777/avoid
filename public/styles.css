@@ -53,7 +53,7 @@ body {
 #hostControls button { pointer-events: auto; padding: 8px 12px; border-radius: 10px; border: 1px solid transparent; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; }
 #hostControls #startBtn { background: linear-gradient(135deg, var(--success), #16a34a); color: #071317; box-shadow: 0 6px 16px rgba(22,163,74,0.35); }
 #hostControls #settingsToggle { background: linear-gradient(135deg, var(--accent), #06b6d4); color: #00222a; box-shadow: 0 6px 16px rgba(6,182,212,0.35); }
-.hidden { display: none; }
+.hidden { display: none !important; }
 
 #enemyCount { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 10; }
 
@@ -117,3 +117,6 @@ body {
 }
 
 /* hide chat during round on small screens if needed via class; by default keep visible */
+#hostControls.hidden { display: none !important; }
+
+#chatShow { position: absolute; right: 12px; top: 60px; z-index: 60; pointer-events: auto; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: linear-gradient(135deg, #334155, #0ea5e9); color: #fff; font-weight: 800; }
