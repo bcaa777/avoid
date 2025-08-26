@@ -25,6 +25,7 @@
 	const setEnemyMin = document.getElementById('setEnemyMin');
 	const setEnemyMax = document.getElementById('setEnemyMax');
 	const setSpawnMs = document.getElementById('setSpawnMs');
+	const setPointsToWin = document.getElementById('setPointsToWin');
 	const applySettings = document.getElementById('applySettings');
 	const enemyCountEl = document.getElementById('enemyCount');
 	const victoryPanel = document.getElementById('victoryPanel');
@@ -183,6 +184,7 @@
 				setEnemyMin.value = settings.enemySpeedMin;
 				setEnemyMax.value = settings.enemySpeedMax;
 				setSpawnMs.value = settings.enemySpawnIntervalMs;
+				if (setPointsToWin) setPointsToWin.value = settings.pointsToWin;
 			}
 			settingsInitialized = true;
 		});
@@ -211,9 +213,10 @@
 			setEnemyMin.value = state.settings.enemySpeedMin;
 			setEnemyMax.value = state.settings.enemySpeedMax;
 			setSpawnMs.value = state.settings.enemySpawnIntervalMs;
+			if (setPointsToWin) setPointsToWin.value = state.settings.pointsToWin;
 		}
 		const disabled = !!state.roundRunning;
-		[setPlayerRadius, setEnemyRadius, setPlayerMaxSpeed, setEnemyMin, setEnemyMax, setSpawnMs, applySettings]
+		[setPlayerRadius, setEnemyRadius, setPlayerMaxSpeed, setEnemyMin, setEnemyMax, setSpawnMs, setPointsToWin, applySettings]
 			.forEach(el => el.disabled = disabled);
 	}
 
@@ -917,6 +920,7 @@
 		addIfValid('enemySpeedMin', setEnemyMin.value);
 		addIfValid('enemySpeedMax', setEnemyMax.value);
 		addIfValid('enemySpawnIntervalMs', setSpawnMs.value);
+		addIfValid('pointsToWin', setPointsToWin && setPointsToWin.value);
 		if (payload.enemySpeedMin !== undefined && payload.enemySpeedMax !== undefined && payload.enemySpeedMax < payload.enemySpeedMin) {
 			payload.enemySpeedMax = payload.enemySpeedMin;
 		}

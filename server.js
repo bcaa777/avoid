@@ -40,6 +40,7 @@ const DEFAULTS = {
 	enemySpeedMax: 240,
 	enemySpawnIntervalMs: 10000,
 	friction: 0.9,
+ 	pointsToWin: 100,
 };
 
 const POWERUP_RADIUS = 27; // 1.5x larger
@@ -371,7 +372,7 @@ function endRound(room) {
 	const alive = Array.from(room.players.values()).filter(p => p.alive);
 	if (alive.length === 1 && room.roundStartedPlayerCount >= 2) {
 		alive[0].score += 10; // winner gets 10 points
-		if (alive[0].score >= 100) { endGame(room); return; }
+		if (alive[0].score >= (room.settings.pointsToWin || DEFAULTS.pointsToWin)) { endGame(room); return; }
 		room.winnerAnnouncementUntil = Date.now() + 3000;
 	}
 	setTimeout(() => {}, 3000);
@@ -537,7 +538,7 @@ function tickPhysics(room, dt) {
 			const dy = pt.y - player.y;
 			if (Math.sqrt(dx * dx + dy * dy) <= (pt.r + player.r)) {
 				player.score += (pt.value || 1);
-				if (player.score >= 100) { endGame(room); ended = true; break; }
+				if (player.score >= (room.settings.pointsToWin || DEFAULTS.pointsToWin)) { endGame(room); ended = true; break; }
 				room.points = room.points.filter(x => x.id !== pt.id);
 				io.to(room.id).emit('pointRemove', { id: pt.id });
 				break;
@@ -699,6 +700,7 @@ io.on('connection', (socket) => {
 		applyFinite('enemySpeedMin', payload.enemySpeedMin, 40, 1600, true);
 		applyFinite('enemySpeedMax', payload.enemySpeedMax, 40, 1600, true);
 		applyFinite('enemySpawnIntervalMs', payload.enemySpawnIntervalMs, 500, 60000, true);
+		applyFinite('pointsToWin', payload.pointsToWin, 10, 10000, true);
 		if (s.enemySpeedMax < s.enemySpeedMin) s.enemySpeedMax = s.enemySpeedMin;
 		s.playerAccel = Math.max(400, Math.min(4000, Math.round(s.playerMaxSpeed * 3.5)));
 		io.to(room.id).emit('settingsUpdated', { settings: room.settings });
