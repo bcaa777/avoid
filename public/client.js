@@ -192,7 +192,16 @@
 			state.powerups.push(pu);
 		});
 		socket.on('powerupRemove', ({ id }) => {
-			if (state && Array.isArray(state.powerups)) state.powerups = state.powerups.filter(p => p.id !== id);
+			if (!state) state = {};
+			const list = Array.isArray(state.powerups) ? state.powerups : [];
+			const gone = list.find(p => p.id === id);
+			if (gone) {
+				const x = worldToScreenX(gone.x); const y = worldToScreenY(gone.y);
+				const col = gone.type === 'freeze' ? '#60a5fa' : gone.type === 'speed' ? '#22c55e' : gone.type === 'bomb' ? '#ef4444' : gone.type === 'shrink' ? '#a78bfa' : '#f59e0b';
+				spawnBurst(x, y, col, 16);
+				if (typeof confetti === 'function') confetti({ particleCount: 16, spread: 20, startVelocity: 20, scalar: 0.6, origin: { x: x / canvas.clientWidth, y: y / canvas.clientHeight } });
+			}
+			state.powerups = list.filter(p => p.id !== id);
 		});
 		socket.on('powerupClear', () => {
 			if (!state) state = {};
@@ -204,7 +213,16 @@
 			state.points.push(pt);
 		});
 		socket.on('pointRemove', ({ id }) => {
-			if (state && Array.isArray(state.points)) state.points = state.points.filter(p => p.id !== id);
+			if (!state) state = {};
+			const list = Array.isArray(state.points) ? state.points : [];
+			const gone = list.find(p => p.id === id);
+			if (gone) {
+				const x = worldToScreenX(gone.x); const y = worldToScreenY(gone.y);
+				const col = (gone.value || 1) >= 5 ? '#f472b6' : (gone.value || 1) >= 2 ? '#fb923c' : '#fde047';
+				spawnBurst(x, y, col, 18);
+				if (typeof confetti === 'function' && (gone.value || 1) >= 5) confetti({ particleCount: 18, spread: 30, startVelocity: 25, origin: { x: x / canvas.clientWidth, y: y / canvas.clientHeight } });
+			}
+			state.points = list.filter(p => p.id !== id);
 		});
 		socket.on('pointClear', () => {
 			if (!state) state = {};
@@ -492,6 +510,25 @@
 			ctx.arc(worldToScreenX(ex.x), worldToScreenY(ex.y), ringR, 0, Math.PI * 2);
 			ctx.stroke();
 			ctx.restore();
+			// awarded points visualization in first 700ms
+			if (ex.pointsAwarded && ex.pointsAwarded > 0) {
+				const showLife = 700;
+				if (age <= showLife) {
+					const p = age / showLife;
+					const sx = worldToScreenX(ex.x);
+					const sy = worldToScreenY(ex.y);
+					ctx.save();
+					ctx.globalAlpha = 1 - p;
+					ctx.fillStyle = '#fde047';
+					ctx.font = `${Math.max(14, Math.floor(22 * (1 + 0.3 * (1 - p))))}px system-ui, sans-serif`;
+					ctx.textAlign = 'center';
+					ctx.textBaseline = 'middle';
+					ctx.shadowColor = 'rgba(0,0,0,0.6)';
+					ctx.shadowBlur = 6;
+					ctx.fillText(`+${ex.pointsAwarded}`, sx, sy);
+					ctx.restore();
+				}
+			}
 		}
 	}
 

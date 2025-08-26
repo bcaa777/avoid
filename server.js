@@ -423,12 +423,19 @@ function applyPowerup(room, player, powerup) {
 			const blastR = (room.settings.enemyRadius || 20) * 10; // halved radius
 			const cx = powerup.x;
 			const cy = powerup.y;
-			room.enemies = room.enemies.filter(e => {
+			let killed = 0;
+			const kept = [];
+			for (const e of room.enemies) {
 				const dx = e.x - cx;
 				const dy = e.y - cy;
-				return Math.sqrt(dx * dx + dy * dy) > (blastR + e.r * 0.5);
-			});
-			room.explosions.push({ id: randomUUID(), x: cx, y: cy, radius: blastR, createdAt: Date.now() });
+				if (Math.sqrt(dx * dx + dy * dy) <= (blastR + e.r * 0.5)) killed++; else kept.push(e);
+			}
+			room.enemies = kept;
+			if (killed > 0) {
+				player.score += killed;
+				if (player.score >= (room.settings.pointsToWin || DEFAULTS.pointsToWin)) { endGame(room); }
+			}
+			room.explosions.push({ id: randomUUID(), x: cx, y: cy, radius: blastR, createdAt: Date.now(), pointsAwarded: killed, awardedTo: player.id });
 			break;
 		}
 		case 'shrink': {
