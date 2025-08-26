@@ -22,7 +22,7 @@ body {
 	--danger: #ef4444;
 }
 
-#menu { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--glass); padding: 18px 22px; border-radius: 16px; box-shadow: 0 12px 40px rgba(0,0,0,0.35), inset 0 0 0 1px var(--glass-strong); backdrop-filter: blur(10px); width: min(480px, 92vw); }
+#menu { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--glass); padding: 18px 22px; border-radius: 16px; box-shadow: 0 12px 40px rgba(0,0,0,0.35), inset 0 0 0 1px var(--glass-strong); backdrop-filter: blur(10px); width: min(560px, 92vw); }
 #menu h1 { margin: 0 0 12px; font-size: 26px; letter-spacing: 0.5px; background: linear-gradient(90deg, #a78bfa, #22d3ee); -webkit-background-clip: text; background-clip: text; color: transparent; }
 #menu label { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 #menu input { padding: 12px 14px; border-radius: 10px; border: 1px solid var(--glass-strong); background: rgba(255,255,255,0.08); color: #fff; outline: none; }
@@ -30,7 +30,18 @@ body {
 #menu button:hover { filter: brightness(1.05); }
 #menu .row { display: flex; gap: 8px; margin-bottom: 10px; }
 #menu .row.join input { flex: 1; }
+#menu .row.create { align-items: center; justify-content: space-between; }
+#menu .row.create #createBtn { margin-left: auto; }
 #menu .row .inline { display: inline-flex; align-items: center; gap: 6px; color: #e2e8f0; }
+
+/* Pretty toggle switch */
+.toggle { position: relative; display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+.toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.toggle .slider { position: relative; width: 48px; height: 26px; background: rgba(255,255,255,0.14); border: 1px solid var(--glass-strong); border-radius: 999px; transition: background .2s ease; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15); }
+.toggle .slider::after { content: ""; position: absolute; width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(135deg, #a78bfa, #22d3ee); top: 1px; left: 1px; transition: transform .2s ease; box-shadow: 0 6px 12px rgba(0,0,0,0.25); }
+.toggle input:checked + .slider { background: rgba(34,197,94,0.35); }
+.toggle input:checked + .slider::after { transform: translateX(22px); }
+.toggle .toggle-text { color: #e2e8f0; font-size: 14px; }
 #menu .hint { margin-top: 8px; font-size: 12px; opacity: 0.9; color: #cbd5e1; }
 
 #game { width: 100vw; height: 100vh; display: block; margin: 0; }
@@ -59,7 +70,7 @@ body {
 }
 #announcement { position: absolute; top: 12px; right: 12px; background: var(--glass); padding: 8px 10px; border-radius: 12px; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,0.25), inset 0 0 0 1px var(--glass-strong); }
 
-.panel { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: min(420px, 92vw); max-height: min(70vh, 520px); overflow: auto; background: var(--glass); padding: 12px 14px; border-radius: 14px; pointer-events: auto; box-shadow: 0 12px 30px rgba(0,0,0,0.3), inset 0 0 0 1px var(--glass-strong); z-index: 20; }
+.panel { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: min(560px, 92vw); max-height: min(70vh, 520px); overflow: auto; background: var(--glass); padding: 12px 14px; border-radius: 14px; pointer-events: auto; box-shadow: 0 12px 30px rgba(0,0,0,0.3), inset 0 0 0 1px var(--glass-strong); z-index: 20; }
 .panel h3 { margin: 0 0 8px; font-size: 16px; color: #a5b4fc; position: sticky; top: 0; background: linear-gradient(180deg, rgba(0,0,0,0.18), rgba(0,0,0,0)); padding: 8px 0; }
 .panel .grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .panel label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

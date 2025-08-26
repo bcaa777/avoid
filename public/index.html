@@ -18,15 +18,19 @@
 				<span>Emoji</span>
 				<input id="emojiInput" type="text" maxlength="4" placeholder="🙂" />
 			</label>
-			<div class="row">
-				<label class="inline"><input id="publicToggle" type="checkbox" /> <span>Public room</span></label>
+			<div class="row create">
+				<label class="toggle">
+					<input id="publicToggle" type="checkbox" />
+					<span class="slider"></span>
+					<span class="toggle-text">Public room</span>
+				</label>
 				<button id="createBtn">Create Room</button>
 			</div>
 			<div class="row join">
 				<input id="roomInput" type="text" maxlength="8" placeholder="Room code" />
 				<button id="joinBtn">Join</button>
 			</div>
-			<div id="lobby" class="panel" style="position:relative;">
+			<div id="lobby" class="panel" style="position:relative; width:100%; transform:none; left:auto;">
 				<h3>Public Rooms</h3>
 				<div id="roomsList" class="rooms"></div>
 				<div class="row" style="justify-content: space-between;">
