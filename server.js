@@ -133,6 +133,7 @@ function createRoom(roomId) {
 		gameOver: false,
 		finalStandings: [],
 		explosions: [], // {id,x,y,radius,createdAt}
+		messages: [], // chat messages {id,fromId,name,color,text,at}
 	};
 	rooms.set(roomId, room);
 	return room;
@@ -611,6 +612,7 @@ function buildState(room) {
 			dashReadyAt: p.dashReadyAt || 0,
 		})),
 		enemies: room.enemies.map(e => ({ id: e.id, x: e.x, y: e.y, r: e.r, color: e.color, spawnSafeUntil: e.spawnSafeUntil || 0, emoji: e.emoji || '👾' })),
+		messages: room.messages.slice(-50),
 	};
 }
 
@@ -678,6 +680,7 @@ io.on('connection', (socket) => {
 		socket.emit('roomJoined', { roomId, hostId: room.hostId });
 		// send initial snapshots and settings to the joining client only
 		socket.emit('settingsUpdated', { settings: room.settings });
+		socket.emit('chatSnapshot', { messages: room.messages.slice(-50) });
 		if (room.powerups.length) socket.emit('powerupSnapshot', { powerups: room.powerups });
 		if (room.points.length) socket.emit('pointSnapshot', { points: room.points });
 		io.to(roomId).emit('state', buildState(room));
@@ -696,6 +699,7 @@ io.on('connection', (socket) => {
 		socket.emit('roomJoined', { roomId: room.id, hostId: room.hostId });
 		// send initial snapshots and settings to the joining client only
 		socket.emit('settingsUpdated', { settings: room.settings });
+		socket.emit('chatSnapshot', { messages: room.messages.slice(-50) });
 		if (room.powerups.length) socket.emit('powerupSnapshot', { powerups: room.powerups });
 		if (room.points.length) socket.emit('pointSnapshot', { points: room.points });
 		io.to(room.id).emit('state', buildState(room));
@@ -804,6 +808,39 @@ io.on('connection', (socket) => {
 		io.to(room.id).emit('powerupClear');
 		io.to(room.id).emit('pointClear');
 		io.to(room.id).emit('state', buildState(room));
+	});
+
+	// Chat
+	let lastChatAt = 0;
+	socket.on('chatSend', ({ text }, ack) => {
+		if (!currentRoomId) { if (typeof ack === 'function') ack({ ok: false }); return; }
+		if (typeof text !== 'string') { if (typeof ack === 'function') ack({ ok: false }); return; }
+		const trimmed = text.trim();
+		if (!trimmed) { if (typeof ack === 'function') ack({ ok: false }); return; }
+		const now = Date.now();
+		if (now - lastChatAt < 600) { if (typeof ack === 'function') ack({ ok: false, rateLimited: true }); return; }
+		lastChatAt = now;
+		const room = getRoom(currentRoomId);
+		if (!room) { if (typeof ack === 'function') ack({ ok: false }); return; }
+		const msg = {
+			id: randomUUID(),
+			fromId: socket.id,
+			name: player.name,
+			color: player.color,
+			text: trimmed.slice(0, 240),
+			at: now,
+		};
+		room.messages.push(msg);
+		if (room.messages.length > 200) room.messages = room.messages.slice(-200);
+		io.to(room.id).emit('chatMessage', msg);
+		if (typeof ack === 'function') ack({ ok: true, msg });
+	});
+
+	socket.on('chatRequest', () => {
+		if (!currentRoomId) return;
+		const room = getRoom(currentRoomId);
+		if (!room) return;
+		socket.emit('chatSnapshot', { messages: room.messages.slice(-50) });
 	});
 });
 

@@ -32,6 +32,37 @@
 	const victoryList = document.getElementById('victoryList');
 	const restartGameBtn = document.getElementById('restartGame');
 	const dashBtn = document.getElementById('dashBtn');
+	// chat elements
+	const chatList = document.getElementById('chatList');
+	const chatForm = document.getElementById('chatForm');
+	const chatInput = document.getElementById('chatInput');
+	const renderedMessageIds = new Set();
+
+	function renderChat(list) {
+		const listEl = chatList || document.getElementById('chatList');
+		if (!listEl || !Array.isArray(list)) return;
+		listEl.innerHTML = '';
+		renderedMessageIds.clear();
+		for (const m of list) appendChat(m, true);
+		listEl.scrollTop = listEl.scrollHeight;
+	}
+
+	function appendChat(m, skipScroll) {
+		const listEl = chatList || document.getElementById('chatList');
+		if (!listEl || !m || typeof m.text !== 'string') return;
+		if (m.id) {
+			if (renderedMessageIds.has(m.id)) return;
+			renderedMessageIds.add(m.id);
+		}
+		const wrap = document.createElement('div');
+		wrap.className = 'chat-item';
+		const dot = document.createElement('div'); dot.className = 'dot'; dot.style.background = m.color || '#22c55e';
+		const meta = document.createElement('div'); meta.className = 'meta'; meta.textContent = `${m.name || 'Player'}:`;
+		const text = document.createElement('div'); text.className = 'text'; text.textContent = m.text;
+		wrap.appendChild(dot); wrap.appendChild(meta); wrap.appendChild(text);
+		listEl.appendChild(wrap);
+		if (!skipScroll) listEl.scrollTop = listEl.scrollHeight;
+	}
 
 	// Prefill emoji from localStorage and send updates immediately when changed
 	function sendEmoji() {
@@ -102,7 +133,10 @@
 			settingsInitialized = false; // new room → re-init when state arrives
 			updateHostControls(hostId);
 			document.getElementById('hud').classList.remove('hidden');
+			const chatEl = document.getElementById('chat'); if (chatEl) chatEl.style.display = 'flex';
 			sendEmoji();
+			socket.emit('chatRequest');
+			appendChat({ name: 'System', color: '#9ca3af', text: 'You joined the room. Say hi!' });
 		});
 		socket.on('roomError', ({ message }) => {
 			alert(message || 'Room error');
@@ -195,6 +229,16 @@
 			if (typeof cfg.inputSendRateHz === 'number' && Number.isFinite(cfg.inputSendRateHz)) {
 				inputSendRateHz = Math.max(1, Math.floor(cfg.inputSendRateHz));
 			}
+		});
+		// chat events
+		socket.on('chatSnapshot', ({ messages }) => {
+			if (!Array.isArray(messages)) return;
+			console.log('[chat] snapshot', messages.length);
+			renderChat(messages);
+		});
+		socket.on('chatMessage', (msg) => {
+			console.log('[chat] message', msg);
+			appendChat(msg);
 		});
 	}
 
@@ -938,6 +982,26 @@
 		// auto-hide settings panel on apply
 		settingsPanel.classList.add('hidden');
 	});
+
+	if (chatForm) {
+		chatForm.addEventListener('submit', (e) => {
+			e.preventDefault();
+			const val = (chatInput && chatInput.value || '').trim();
+			if (!val) return;
+			if (socket) socket.emit('chatSend', { text: val }, (res) => {
+				if (res && res.ok) {
+					// rely on broadcast; no local append to avoid duplicates
+					console.log('[chat] sent ok');
+				} else if (res && res.rateLimited) {
+					appendChat({ name: 'System', color: '#aaa', text: 'You are sending messages too fast.' });
+					console.warn('[chat] rate limited');
+				} else {
+					console.warn('[chat] send failed', res);
+				}
+			});
+			chatInput.value = '';
+		});
+	}
 
 	const keys = new Set();
 	let lastInputSentAt = 0;
