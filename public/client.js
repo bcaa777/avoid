@@ -107,7 +107,17 @@
 		socket.on('state', (s) => {
 			// Keep previous snapshot for local-only effects
 			prevState = state;
-			state = s;
+			// merge incremental fields into local state
+			if (!state) state = s; else {
+				state = {
+					...state,
+					...s,
+					// keep existing settings/powerups/points which now come via dedicated events
+					settings: state.settings,
+					powerups: state.powerups,
+					points: state.points,
+				};
+			}
 			worldWidth = s.world.width;
 			worldHeight = s.world.height;
 			updateScoreboard();
@@ -129,6 +139,39 @@
 			triggerEffects(prevState, state);
 			// Spawn local particles for pickups and deaths
 			spawnPickupAndDeathParticles(prevState, state);
+		});
+		// snapshots and deltas for powerups/points
+		socket.on('powerupSnapshot', ({ powerups }) => {
+			if (!state) state = {};
+			state.powerups = Array.isArray(powerups) ? powerups : [];
+		});
+		socket.on('pointSnapshot', ({ points }) => {
+			if (!state) state = {};
+			state.points = Array.isArray(points) ? points : [];
+		});
+		socket.on('powerupAdd', (pu) => {
+			if (!state) state = {};
+			if (!Array.isArray(state.powerups)) state.powerups = [];
+			state.powerups.push(pu);
+		});
+		socket.on('powerupRemove', ({ id }) => {
+			if (state && Array.isArray(state.powerups)) state.powerups = state.powerups.filter(p => p.id !== id);
+		});
+		socket.on('powerupClear', () => {
+			if (!state) state = {};
+			state.powerups = [];
+		});
+		socket.on('pointAdd', (pt) => {
+			if (!state) state = {};
+			if (!Array.isArray(state.points)) state.points = [];
+			state.points.push(pt);
+		});
+		socket.on('pointRemove', ({ id }) => {
+			if (state && Array.isArray(state.points)) state.points = state.points.filter(p => p.id !== id);
+		});
+		socket.on('pointClear', () => {
+			if (!state) state = {};
+			state.points = [];
 		});
 		socket.on('settingsUpdated', ({ settings }) => {
 			pendingSettings = null;
@@ -885,6 +928,14 @@
 	});
 
 	const keys = new Set();
+	let lastInputSentAt = 0;
+	const INPUT_INTERVAL_MS = Math.floor(1000 / 30);
+	function sendThrottledInput() {
+		const now = Date.now();
+		if (now - lastInputSentAt < INPUT_INTERVAL_MS) return;
+		lastInputSentAt = now;
+		if (socket) socket.emit('input', input);
+	}
 	function recomputeKeyboardInput() {
 		let x = 0, y = 0;
 		if (keys.has('ArrowLeft') || keys.has('KeyA')) x -= 1;
@@ -893,7 +944,7 @@
 		if (keys.has('ArrowDown') || keys.has('KeyS')) y += 1;
 		const len = Math.hypot(x, y) || 1;
 		input.x = x / len; input.y = y / len;
-		if (socket) socket.emit('input', input);
+		sendThrottledInput();
 	}
 	window.addEventListener('keydown', (e) => {
 		keys.add(e.code);
@@ -921,12 +972,12 @@
 		const len = Math.hypot(nx, ny) || 1;
 		input.x = Math.max(-1, Math.min(1, nx / len));
 		input.y = Math.max(-1, Math.min(1, ny / len));
-		if (socket) socket.emit('input', input);
+		sendThrottledInput();
 	}
 	function centerStick() {
 		stick.style.transform = 'translate(0,0)';
 		input = { x: 0, y: 0 };
-		if (socket) socket.emit('input', input);
+		sendThrottledInput();
 	}
 
 	joystick.addEventListener('pointerdown', (e) => {

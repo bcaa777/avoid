@@ -7,7 +7,9 @@ const { randomUUID } = require('crypto');
 // Server setup
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+	perMessageDeflate: { threshold: 256 },
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -254,14 +256,16 @@ function spawnPowerup(room) {
 	const types = ['freeze', 'speed', 'immortal', 'bomb', 'shrink'];
 	const type = types[Math.floor(Math.random() * types.length)];
 	const pos = randomSpawn(POWERUP_RADIUS);
-	room.powerups.push({
+	const pu = {
 		id: randomUUID(),
 		type,
 		x: pos.x,
 		y: pos.y,
 		r: POWERUP_RADIUS,
 		expiresAt: now + POWERUP_LIFETIME_MS,
-	});
+	};
+	room.powerups.push(pu);
+	io.to(room.id).emit('powerupAdd', pu);
 	const scale = (room.players.size <= 2) ? 1 : (room.players.size <= 6 ? 0.5 : (1/3));
 	const min = Math.round(POWERUP_SPAWN_MIN_MS * scale);
 	const max = Math.round(POWERUP_SPAWN_MAX_MS * scale);
@@ -271,14 +275,16 @@ function spawnPowerup(room) {
 function spawnPoint(room) {
 	const now = Date.now();
 	const pos = randomSpawn(POINT_RADIUS);
-	room.points.push({
+	const pt = {
 		id: randomUUID(),
 		x: pos.x,
 		y: pos.y,
 		r: POINT_RADIUS,
 		value: pickPointValue(),
 		expiresAt: now + POINT_LIFETIME_MS,
-	});
+	};
+	room.points.push(pt);
+	io.to(room.id).emit('pointAdd', pt);
 	room.nextPointAt = now + (POINT_SPAWN_MIN_MS + Math.floor(Math.random() * (POINT_SPAWN_MAX_MS - POINT_SPAWN_MIN_MS + 1)));
 }
 
@@ -305,6 +311,8 @@ function startRound(room) {
 	room.enemies = [];
 	room.powerups = [];
 	room.points = [];
+	io.to(room.id).emit('powerupClear');
+	io.to(room.id).emit('pointClear');
 	resetPlayersForRound(room);
 	room.enemies.push(createEnemy(room));
 	room.enemies.push(createEnemy(room));
@@ -339,7 +347,13 @@ function endGame(room) {
 	room.finalStandings = computeStandings(room);
 	room.winnerAnnouncementUntil = 0;
 	room.freezeUntil = 0;
+	io.to(room.id).emit('powerupClear');
+	io.to(room.id).emit('pointClear');
 	io.to(room.id).emit('state', buildState(room));
+	io.to(room.id).emit('powerupSnapshot', { powerups: room.powerups });
+	io.to(room.id).emit('pointSnapshot', { points: room.points });
+	io.to(room.id).emit('powerupSnapshot', { powerups: room.powerups });
+	io.to(room.id).emit('pointSnapshot', { points: room.points });
 }
 
 function endRound(room) {
@@ -350,6 +364,10 @@ function endRound(room) {
 	}
 	room.powerups = [];
 	room.points = [];
+	io.to(room.id).emit('powerupClear');
+	io.to(room.id).emit('pointClear');
+	io.to(room.id).emit('powerupSnapshot', { powerups: room.powerups });
+	io.to(room.id).emit('pointSnapshot', { points: room.points });
 	const alive = Array.from(room.players.values()).filter(p => p.alive);
 	if (alive.length === 1 && room.roundStartedPlayerCount >= 2) {
 		alive[0].score += 10; // winner gets 10 points
@@ -487,7 +505,11 @@ function tickPhysics(room, dt) {
 	}
 
 	// Powerups: expire and pickups
+	const beforePu = new Set(room.powerups.map(p => p.id));
 	room.powerups = room.powerups.filter(pu => pu.expiresAt > now);
+	for (const removedId of [...beforePu].filter(id => !room.powerups.find(p => p.id === id))) {
+		io.to(room.id).emit('powerupRemove', { id: removedId });
+	}
 	for (const pu of room.powerups.slice()) {
 		for (const player of room.players.values()) {
 			if (!player.alive) continue;
@@ -496,12 +518,17 @@ function tickPhysics(room, dt) {
 			if (Math.sqrt(dx * dx + dy * dy) <= (pu.r + player.r)) {
 				applyPowerup(room, player, pu);
 				room.powerups = room.powerups.filter(x => x.id !== pu.id);
+				io.to(room.id).emit('powerupRemove', { id: pu.id });
 				break;
 			}
 		}
 	}
 	// Points: expire and pickups
+	const beforePts = new Set(room.points.map(p => p.id));
 	room.points = room.points.filter(pt => pt.expiresAt > now);
+	for (const removedId of [...beforePts].filter(id => !room.points.find(p => p.id === id))) {
+		io.to(room.id).emit('pointRemove', { id: removedId });
+	}
 	for (const pt of room.points.slice()) {
 		let ended = false;
 		for (const player of room.players.values()) {
@@ -512,6 +539,7 @@ function tickPhysics(room, dt) {
 				player.score += (pt.value || 1);
 				if (player.score >= 100) { endGame(room); ended = true; break; }
 				room.points = room.points.filter(x => x.id !== pt.id);
+				io.to(room.id).emit('pointRemove', { id: pt.id });
 				break;
 			}
 		}
@@ -540,7 +568,6 @@ function buildState(room) {
 		gameOver: !!room.gameOver,
 		finalStandings: room.finalStandings || [],
 		explosions: room.explosions.slice(-6),
-		settings: room.settings,
 		players: Array.from(room.players.values()).map(p => ({
 			id: p.id,
 			name: p.name,
@@ -558,8 +585,6 @@ function buildState(room) {
 			dashReadyAt: p.dashReadyAt || 0,
 		})),
 		enemies: room.enemies.map(e => ({ id: e.id, x: e.x, y: e.y, r: e.r, color: e.color, spawnSafeUntil: e.spawnSafeUntil || 0, emoji: e.emoji || '👾' })),
-		powerups: room.powerups.map(pu => ({ id: pu.id, type: pu.type, x: pu.x, y: pu.y, r: pu.r, expiresAt: pu.expiresAt })),
-		points: room.points.map(pt => ({ id: pt.id, x: pt.x, y: pt.y, r: pt.r, value: pt.value || 1, expiresAt: pt.expiresAt })),
 	};
 }
 
@@ -623,6 +648,10 @@ io.on('connection', (socket) => {
 		socket.join(roomId);
 		currentRoomId = roomId;
 		socket.emit('roomJoined', { roomId, hostId: room.hostId });
+		// send initial snapshots and settings to the joining client only
+		socket.emit('settingsUpdated', { settings: room.settings });
+		if (room.powerups.length) socket.emit('powerupSnapshot', { powerups: room.powerups });
+		if (room.points.length) socket.emit('pointSnapshot', { points: room.points });
 		io.to(roomId).emit('state', buildState(room));
 	});
 
@@ -637,6 +666,10 @@ io.on('connection', (socket) => {
 		socket.join(room.id);
 		currentRoomId = room.id;
 		socket.emit('roomJoined', { roomId: room.id, hostId: room.hostId });
+		// send initial snapshots and settings to the joining client only
+		socket.emit('settingsUpdated', { settings: room.settings });
+		if (room.powerups.length) socket.emit('powerupSnapshot', { powerups: room.powerups });
+		if (room.points.length) socket.emit('pointSnapshot', { points: room.points });
 		io.to(room.id).emit('state', buildState(room));
 	});
 
@@ -668,8 +701,7 @@ io.on('connection', (socket) => {
 		applyFinite('enemySpawnIntervalMs', payload.enemySpawnIntervalMs, 500, 60000, true);
 		if (s.enemySpeedMax < s.enemySpeedMin) s.enemySpeedMax = s.enemySpeedMin;
 		s.playerAccel = Math.max(400, Math.min(4000, Math.round(s.playerMaxSpeed * 3.5)));
-		io.to(room.id).emit('state', buildState(room));
-		socket.emit('settingsUpdated', { settings: room.settings });
+		io.to(room.id).emit('settingsUpdated', { settings: room.settings });
 	});
 
 	socket.on('input', (vec) => {
@@ -736,6 +768,8 @@ io.on('connection', (socket) => {
 			p.invincibleUntil = 0;
 		}
 		room.finalStandings = [];
+		io.to(room.id).emit('powerupClear');
+		io.to(room.id).emit('pointClear');
 		io.to(room.id).emit('state', buildState(room));
 	});
 });
@@ -750,7 +784,7 @@ setInterval(() => {
 
 setInterval(() => {
 	for (const room of rooms.values()) {
-		io.to(room.id).emit('state', buildState(room));
+		io.to(room.id).volatile.emit('state', buildState(room));
 	}
 }, Math.floor(1000 / BROADCAST_RATE));
 
