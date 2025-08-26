@@ -47,7 +47,15 @@ body {
 
 .badge { pointer-events: none; padding: 6px 10px; border-radius: 999px; background: linear-gradient(135deg, #ef4444, #f59e0b); color: #111; font-weight: 800; text-transform: uppercase; font-size: 12px; box-shadow: 0 6px 16px rgba(239,68,68,0.35); }
 
+/* Make dash button interactive despite .badge default */
+#dashBtn { pointer-events: auto; touch-action: manipulation; z-index: 6; }
+
 #scoreboard { position: absolute; bottom: 12px; left: 12px; background: var(--glass); padding: 8px 10px; border-radius: 12px; font-size: 14px; line-height: 1.2; box-shadow: 0 6px 20px rgba(0,0,0,0.25), inset 0 0 0 1px var(--glass-strong); }
+
+/* On desktop, place scoreboard above the dash button (left side) */
+@media (min-width: 900px) {
+	#scoreboard { bottom: 68px; }
+}
 #announcement { position: absolute; top: 12px; right: 12px; background: var(--glass); padding: 8px 10px; border-radius: 12px; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,0.25), inset 0 0 0 1px var(--glass-strong); }
 
 .panel { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: min(420px, 92vw); max-height: min(70vh, 520px); overflow: auto; background: var(--glass); padding: 12px 14px; border-radius: 14px; pointer-events: auto; box-shadow: 0 12px 30px rgba(0,0,0,0.3), inset 0 0 0 1px var(--glass-strong); z-index: 20; }

@@ -688,7 +688,7 @@
 			ctx.shadowBlur = Math.max(4, r * 0.5);
 			ctx.shadowOffsetY = Math.max(1, Math.floor(r * 0.10));
 			ctx.shadowOffsetX = 0;
-			ctx.fillText(e.emoji || '👾', ex, ey + 1);
+			//ctx.fillText(e.emoji || '👾', ex, ey + 1);
 			ctx.restore();
 		}
 
@@ -837,23 +837,23 @@
 	const keys = new Set();
 	function recomputeKeyboardInput() {
 		let x = 0, y = 0;
-		if (keys.has('ArrowLeft') || keys.has('a')) x -= 1;
-		if (keys.has('ArrowRight') || keys.has('d')) x += 1;
-		if (keys.has('ArrowUp') || keys.has('w')) y -= 1;
-		if (keys.has('ArrowDown') || keys.has('s')) y += 1;
+		if (keys.has('ArrowLeft') || keys.has('KeyA')) x -= 1;
+		if (keys.has('ArrowRight') || keys.has('KeyD')) x += 1;
+		if (keys.has('ArrowUp') || keys.has('KeyW')) y -= 1;
+		if (keys.has('ArrowDown') || keys.has('KeyS')) y += 1;
 		const len = Math.hypot(x, y) || 1;
 		input.x = x / len; input.y = y / len;
 		if (socket) socket.emit('input', input);
 	}
 	window.addEventListener('keydown', (e) => {
-		keys.add(e.key);
+		keys.add(e.code);
 		if (e.key === 'Shift' || e.code === 'Space') {
 			e.preventDefault();
 			if (socket) socket.emit('dash');
 		}
 		recomputeKeyboardInput();
 	});
-	window.addEventListener('keyup', (e) => { keys.delete(e.key); recomputeKeyboardInput(); });
+	window.addEventListener('keyup', (e) => { keys.delete(e.code); recomputeKeyboardInput(); });
 
 	let joyActive = false;
 	let joyStart = { x: 0, y: 0 };
@@ -898,9 +898,9 @@
 	joystick.addEventListener('pointercancel', () => { joyActive = false; centerStick(); });
 
 	if (dashBtn) {
-		dashBtn.addEventListener('click', () => {
-			if (socket) socket.emit('dash');
-		});
+		const doDash = () => { if (socket) socket.emit('dash'); };
+		dashBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); doDash(); });
+		dashBtn.addEventListener('click', (e) => { e.preventDefault(); doDash(); });
 	}
 
 	restartGameBtn.addEventListener('click', () => {
